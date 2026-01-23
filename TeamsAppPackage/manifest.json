@@ -1,0 +1,89 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "YOUR-TEAMS-APP-GUID",
+  "packageName": "com.yourcompany.crosstenantbot",
+  "developer": {
+    "name": "Your Company",
+    "websiteUrl": "https://www.yourcompany.com",
+    "privacyUrl": "https://www.yourcompany.com/privacy",
+    "termsOfUseUrl": "https://www.yourcompany.com/terms"
+  },
+  "name": {
+    "short": "Cross-Tenant Bot",
+    "full": "Cross-Tenant Communication Bot with RSC Context"
+  },
+  "description": {
+    "short": "A bot that reads channel context using RSC permissions",
+    "full": "This bot can read channel messages for context using Resource-Specific Consent (RSC) permissions. No user authentication required for channel context. Supports 1:1 chats, group chats, and team channels."
+  },
+  "icons": {
+    "outline": "outline.png",
+    "color": "color.png"
+  },
+  "accentColor": "#0078D4",
+  "bots": [
+    {
+      "botId": "YOUR-UAMI-CLIENT-ID",
+      "scopes": ["personal", "team", "groupChat"],
+      "commandLists": [
+        {
+          "scopes": ["personal", "team", "groupChat"],
+          "commands": [
+            {
+              "title": "help",
+              "description": "Shows help and available commands"
+            },
+            {
+              "title": "info",
+              "description": "Displays your user and tenant information"
+            },
+            {
+              "title": "context",
+              "description": "Shows recent conversation context"
+            },
+            {
+              "title": "status",
+              "description": "Shows bot status and configuration"
+            },
+            {
+              "title": "rsctest",
+              "description": "Diagnose RSC permissions (use in channel)"
+            }
+          ]
+        }
+      ],
+      "supportsFiles": false,
+      "isNotificationOnly": false
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": ["YOUR-CONTAINER-APP.azurecontainerapps.io"],
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": [
+        {
+          "name": "ChannelMessage.Read.Group",
+          "type": "Application"
+        },
+        {
+          "name": "TeamSettings.Read.Group",
+          "type": "Application"
+        },
+        {
+          "name": "TeamMember.Read.Group",
+          "type": "Application"
+        },
+        {
+          "name": "ChannelSettings.Read.Group",
+          "type": "Application"
+        }
+      ]
+    }
+  },
+  "webApplicationInfo": {
+    "id": "YOUR-GRAPH-APP-ID",
+    "resource": "https://graph.microsoft.com"
+  }
+}

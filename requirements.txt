@@ -1,0 +1,30 @@
+# Cross-Tenant Teams Bot Requirements
+# Python 3.10+
+
+# Microsoft 365 Agents SDK - Core components
+microsoft-agents-activity>=0.3.0
+microsoft-agents-hosting-core>=0.3.0
+microsoft-agents-hosting-aiohttp>=0.3.0
+microsoft-agents-hosting-teams>=0.3.0
+microsoft-agents-authentication-msal>=0.3.0
+
+# Azure Identity - for User-Assigned Managed Identity support
+azure-identity>=1.13.0
+
+# Azure Key Vault - for secure client secret retrieval
+azure-keyvault-secrets>=4.7.0
+
+# Async HTTP client
+aiohttp>=3.8.0
+
+# Additional utilities
+python-dotenv>=1.0.0
+
+# JWT decoding for debugging
+PyJWT>=2.8.0
+
+# Development dependencies (uncomment if developing locally)
+# pytest>=7.0.0
+# pytest-asyncio>=0.21.0
+# black>=23.0.0
+# flake8>=6.0.0
