@@ -100,7 +100,7 @@ This architecture separates concerns and eliminates secrets:
 ### 1. Clone and Install
 
 ```bash
-git clone <your-repo>
+git clone https://github.com/divssheth/cross-tenant-bot.git
 cd cross-tenant-bot
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
