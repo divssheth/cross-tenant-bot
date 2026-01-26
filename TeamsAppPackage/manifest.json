@@ -59,7 +59,7 @@
     }
   ],
   "permissions": ["identity", "messageTeamMembers"],
-  "validDomains": ["YOUR-CONTAINER-APP.azurecontainerapps.io"],
+  "validDomains": ["YOUR-CONTAINER-APP-DOMAIN"],
   "authorization": {
     "permissions": {
       "resourceSpecific": [

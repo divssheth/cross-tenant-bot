@@ -62,3 +62,6 @@ CrossTenantBot.zip
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Temp build folder
+temp/
