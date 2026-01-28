@@ -444,6 +444,8 @@ Or simply type any message and I'll respond.
         # Get tenant ID for cross-tenant scenarios
         tenant_id = user_context.user_tenant_id or os.getenv("AZURE_TENANT_ID")
         
+        logger.debug(f"Context command: type={conv_type}, team_id={team_id}, channel_id={channel_id[:20] if channel_id else None}...")
+        
         if conv_type == "channel" and team_id and channel_id:
             # For channels, use RSC to get messages from Graph API
             try:
