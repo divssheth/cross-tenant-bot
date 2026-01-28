@@ -366,6 +366,36 @@ Expected response includes entries with your app's `clientAppId`.
 | 403 with `Group.Selected` | Azure AD permissions conflict | Remove all Graph permissions from Azure AD app |
 | External app ID mismatch | Manifest not updated | Republish app with correct `webApplicationInfo.id` |
 | Token acquisition fails | Wrong tenant ID | Ensure you're using the target tenant's ID |
+| 403 with "resource not found" | Wrong team_id format | Use M365 Group ID (GUID), not the channel-style `19:xxx` format |
+
+### Extracting the Correct Team ID for Graph API
+
+The Graph API requires the **M365 Group ID** (a GUID) as the `team_id` parameter, not the channel-style `19:xxx@thread.tacv2` format.
+
+The `conversation.id` in channel activities contains the Group ID in this format:
+```
+19:abc123@thread.tacv2;groupId=12345678-1234-1234-1234-123456789abc;tenantId=...
+```
+
+Extract the `groupId` value using regex:
+```python
+import re
+
+def extract_team_channel_ids(activity) -> tuple:
+    conv_id = activity.conversation.id or ''
+    
+    # Extract M365 Group ID (required for Graph API)
+    group_match = re.search(r'groupId=([a-f0-9-]+)', conv_id, re.IGNORECASE)
+    team_id = group_match.group(1) if group_match else None
+    
+    # Extract channel ID (the 19:xxx part)
+    channel_match = re.search(r'(19:[^;]+)', conv_id)
+    channel_id = channel_match.group(1) if channel_match else None
+    
+    return team_id, channel_id
+```
+
+**Note:** The `channel_data.team.id` field may return the channel-style ID (`19:xxx`), which will cause 403 errors when used with Graph API. Always extract `groupId` from `conversation.id` for reliable results.
 
 ### Azure AD App Permissions
 

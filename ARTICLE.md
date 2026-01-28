@@ -230,11 +230,44 @@ def extract_tenant_id(activity) -> str:
     return tenant.get("id")
 ```
 
+### Extracting Team and Channel IDs
+
+A critical detail for Graph API calls: the `team_id` must be the **M365 Group ID** (a GUID), not the channel-style `19:xxx@thread.tacv2` format that appears in some activity fields.
+
+The `conversation.id` in channel activities contains the Group ID:
+```
+19:abc123@thread.tacv2;groupId=12345678-1234-1234-1234-123456789abc;tenantId=...
+```
+
+Extract both IDs from `conversation.id`:
+
+```python
+import re
+
+def extract_team_channel_ids(activity) -> tuple:
+    """Extract team (M365 Group ID) and channel IDs from a Teams activity."""
+    conv_id = activity.conversation.id or ''
+    
+    # Extract groupId (M365 Group ID) - required for Graph API
+    group_match = re.search(r'groupId=([a-f0-9-]+)', conv_id, re.IGNORECASE)
+    team_id = group_match.group(1) if group_match else None
+    
+    # Extract channel_id (the 19:xxx@thread.tacv2 part)
+    channel_match = re.search(r'(19:[^;]+)', conv_id)
+    channel_id = channel_match.group(1) if channel_match else None
+    
+    return team_id, channel_id
+```
+
+**Warning:** Do not use `channel_data.team.id` or `channel_data.teamsTeamId`—these may return the channel-style ID, which causes 403 errors when used with Graph API.
+
 ### Reading Channel Messages with RSC
 
 With RSC permissions, you can read channel messages without user authentication:
 
 ```python
+from urllib.parse import quote
+
 async def get_channel_messages(team_id: str, channel_id: str, tenant_id: str):
     """Read channel messages using RSC permissions."""
     
@@ -245,8 +278,12 @@ async def get_channel_messages(team_id: str, channel_id: str, tenant_id: str):
         "Content-Type": "application/json"
     }
     
+    # URL encode the channel_id (contains special characters like @ and :)
+    encoded_channel_id = quote(channel_id, safe='')
+    
     # Beta endpoint required for RSC channel message access
-    url = f"https://graph.microsoft.com/beta/teams/{team_id}/channels/{channel_id}/messages"
+    # team_id must be M365 Group ID (GUID), not 19:xxx format
+    url = f"https://graph.microsoft.com/beta/teams/{team_id}/channels/{encoded_channel_id}/messages"
     
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
@@ -254,7 +291,7 @@ async def get_channel_messages(team_id: str, channel_id: str, tenant_id: str):
             return data.get("value", [])
 ```
 
-Note the use of the beta endpoint. As of this writing, RSC-based channel message access requires the beta API.
+Note the use of the beta endpoint. As of this writing, RSC-based channel message access requires the beta API. Also note the URL encoding of `channel_id` to handle special characters.
 
 ### Fetching Message Replies
 
@@ -286,6 +323,8 @@ Causes and solutions:
 3. **Manifest not updated**: After changing `webApplicationInfo.id`, you must republish the Teams app and reinstall it in each team.
 
 4. **Tenant RSC policy**: The target tenant may have RSC disabled. Check Teams Admin Center settings.
+
+5. **Wrong team_id format**: The Graph API requires the M365 Group ID (a GUID like `12345678-1234-1234-1234-123456789abc`), not the channel-style ID (`19:xxx@thread.tacv2`). Extract `groupId` from `conversation.id` rather than using `channel_data.team.id`.
 
 ### Verifying RSC Permissions
 
