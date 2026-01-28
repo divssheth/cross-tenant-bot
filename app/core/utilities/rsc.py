@@ -2,29 +2,29 @@
 # Licensed under the MIT License.
 
 """
-Graph API Client with Application Permissions (RSC) - Multi-Tenant Support
+RSC Utility - Resource-Specific Consent for reading channel messages.
 
-This module provides functions to call Microsoft Graph API using application
-permissions (client credentials flow) for cross-tenant RSC access.
+Use this utility in your handlers when you need channel conversation context.
+Requires ENABLE_RSC=true and proper RSC permissions in manifest.
 
-Architecture:
-- UAMI is used to securely retrieve the client secret from Azure Key Vault
-- A multi-tenant app registration with client secret is used for Graph API auth
-- This allows the bot to access Graph API in ANY tenant where the app is installed
-
-Flow:
-1. UAMI authenticates to Azure Key Vault (no secrets stored in code/config)
-2. Client secret is retrieved from Key Vault
-3. Client credentials flow authenticates to the TARGET tenant's Graph API
-4. RSC permissions (granted at app install) allow channel message access
+Example usage in a handler:
+    from app.core.utilities.rsc import get_channel_context, is_rsc_enabled
+    
+    class MyHandler(CommandHandler):
+        async def handle(self, context, state, args):
+            if is_rsc_enabled() and is_channel_conversation(context):
+                messages = await get_channel_context(context, max_messages=20)
+                # Use messages for AI context
 """
 
-import os
+import re
 import asyncio
 import aiohttp
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
+
+from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,12 @@ _token_cache: Dict[str, Dict[str, Any]] = {}
 _client_secret_cache: Dict[str, str] = {}
 
 
-async def get_client_secret_from_keyvault() -> Optional[str]:
+def is_rsc_enabled() -> bool:
+    """Check if RSC is enabled and configured."""
+    return settings.ENABLE_RSC and bool(settings.GRAPH_APP_ID)
+
+
+async def _get_client_secret_from_keyvault() -> Optional[str]:
     """
     Retrieve the Graph API client secret from Azure Key Vault using UAMI.
     
@@ -52,12 +57,12 @@ async def get_client_secret_from_keyvault() -> Optional[str]:
     if cache_key in _client_secret_cache:
         return _client_secret_cache[cache_key]
     
-    key_vault_name = os.getenv("KEY_VAULT_NAME")
-    secret_name = os.getenv("GRAPH_CLIENT_SECRET_NAME", "graph-client-secret")
+    key_vault_name = settings.KEY_VAULT_NAME
+    secret_name = settings.GRAPH_CLIENT_SECRET_NAME
     
     if not key_vault_name:
         # Fallback: check for direct environment variable (for local dev only)
-        direct_secret = os.getenv("GRAPH_CLIENT_SECRET")
+        direct_secret = settings.GRAPH_CLIENT_SECRET
         if direct_secret:
             logger.warning("Using GRAPH_CLIENT_SECRET from env (not recommended for production)")
             return direct_secret
@@ -69,7 +74,7 @@ async def get_client_secret_from_keyvault() -> Optional[str]:
         from azure.keyvault.secrets import SecretClient
         
         # Use UAMI to authenticate to Key Vault
-        uami_client_id = os.getenv("AZURE_CLIENT_ID")
+        uami_client_id = settings.AZURE_CLIENT_ID
         credential = ManagedIdentityCredential(client_id=uami_client_id)
         
         vault_url = f"https://{key_vault_name}.vault.azure.net"
@@ -85,7 +90,8 @@ async def get_client_secret_from_keyvault() -> Optional[str]:
         logger.info(f"Successfully retrieved secret '{secret_name}' from Key Vault")
         
         # Cache the secret
-        _client_secret_cache[cache_key] = secret.value
+        if secret.value:
+            _client_secret_cache[cache_key] = secret.value
         return secret.value
         
     except Exception as e:
@@ -94,7 +100,7 @@ async def get_client_secret_from_keyvault() -> Optional[str]:
         return None
 
 
-async def get_app_token(tenant_id: Optional[str] = None) -> Optional[str]:
+async def _get_app_token(tenant_id: Optional[str] = None) -> Optional[str]:
     """
     Get an application token for Graph API using client credentials flow.
     
@@ -108,12 +114,12 @@ async def get_app_token(tenant_id: Optional[str] = None) -> Optional[str]:
         Access token string, or None if failed
     """
     if not tenant_id:
-        tenant_id = os.getenv("AZURE_TENANT_ID")
+        tenant_id = settings.AZURE_TENANT_ID
         if not tenant_id:
             logger.error("tenant_id is required for cross-tenant Graph API access")
             return None
     
-    graph_app_id = os.getenv("GRAPH_APP_ID")
+    graph_app_id = settings.GRAPH_APP_ID
     if not graph_app_id:
         logger.error("GRAPH_APP_ID must be set (multi-tenant app registration Client ID)")
         return None
@@ -127,7 +133,7 @@ async def get_app_token(tenant_id: Optional[str] = None) -> Optional[str]:
             return cached["token"]
     
     # Get client secret from Key Vault
-    client_secret = await get_client_secret_from_keyvault()
+    client_secret = await _get_client_secret_from_keyvault()
     if not client_secret:
         logger.error("Could not retrieve client secret - cannot authenticate to Graph API")
         return None
@@ -167,7 +173,7 @@ async def get_app_token(tenant_id: Optional[str] = None) -> Optional[str]:
                 return None
 
 
-async def get_channel_messages_rsc(
+async def get_channel_messages(
     team_id: str,
     channel_id: str,
     top: int = 50,
@@ -189,7 +195,11 @@ async def get_channel_messages_rsc(
     Returns:
         List of message dictionaries
     """
-    token = await get_app_token(tenant_id)
+    if not is_rsc_enabled():
+        logger.warning("RSC is not enabled - cannot get channel messages")
+        return []
+    
+    token = await _get_app_token(tenant_id)
     if not token:
         logger.error("Could not get app token for channel messages")
         return []
@@ -225,7 +235,7 @@ async def get_channel_messages_rsc(
                 return []
 
 
-async def get_message_replies_rsc(
+async def get_message_replies(
     team_id: str,
     channel_id: str,
     message_id: str,
@@ -249,7 +259,10 @@ async def get_message_replies_rsc(
     Returns:
         List of reply message dictionaries
     """
-    token = await get_app_token(tenant_id)
+    if not is_rsc_enabled():
+        return []
+    
+    token = await _get_app_token(tenant_id)
     if not token:
         logger.error("Could not get app token for message replies")
         return []
@@ -279,7 +292,7 @@ async def get_message_replies_rsc(
                 return []
 
 
-async def get_channel_messages_with_replies_rsc(
+async def get_channel_messages_with_replies(
     team_id: str,
     channel_id: str,
     top: int = 20,
@@ -306,7 +319,7 @@ async def get_channel_messages_with_replies_rsc(
         List of message dictionaries, each with a 'replies' field if include_replies=True
     """
     # Get top-level messages
-    messages = await get_channel_messages_rsc(team_id, channel_id, top, tenant_id)
+    messages = await get_channel_messages(team_id, channel_id, top, tenant_id)
     
     if not include_replies or not messages:
         return messages
@@ -317,7 +330,7 @@ async def get_channel_messages_with_replies_rsc(
         reply_count = msg.get("replyToId") is None  # Only fetch replies for top-level messages
         
         if message_id and reply_count:
-            replies = await get_message_replies_rsc(
+            replies = await get_message_replies(
                 team_id, channel_id, message_id, 
                 top=max_replies_per_message, 
                 tenant_id=tenant_id
@@ -328,78 +341,48 @@ async def get_channel_messages_with_replies_rsc(
     return messages
 
 
-async def get_team_info(
-    team_id: str,
-    tenant_id: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
+async def get_channel_context(
+    context,
+    max_messages: int = 20,
+    include_replies: bool = True
+) -> str:
     """
-    Get information about a team.
+    Convenience function: Get formatted channel context from a TurnContext.
+    
+    Extracts team/channel IDs from the context and returns formatted messages.
     
     Args:
-        team_id: The ID of the team
-        tenant_id: Optional tenant ID for cross-tenant scenarios
+        context: TurnContext from the bot
+        max_messages: Maximum messages to fetch
+        include_replies: Whether to include reply threads
         
     Returns:
-        Team information dictionary, or None if failed
+        Formatted string of channel messages
     """
-    token = await get_app_token(tenant_id)
-    if not token:
-        return None
+    from app.core import extract_team_channel_ids, get_conversation_type_from_activity
+    from app.core.user_context import UserContext
     
-    async with aiohttp.ClientSession() as session:
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
-        
-        async with session.get(
-            f"{GRAPH_BASE_URL}/teams/{team_id}",
-            headers=headers
-        ) as response:
-            if response.status == 200:
-                return await response.json()
-            else:
-                error_text = await response.text()
-                logger.error(f"Error getting team info: {response.status} - {error_text}")
-                return None
-
-
-async def get_channel_info(
-    team_id: str,
-    channel_id: str,
-    tenant_id: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
-    """
-    Get information about a channel.
+    conv_type = get_conversation_type_from_activity(context.activity)
+    team_id, channel_id = extract_team_channel_ids(context.activity)
     
-    Args:
-        team_id: The ID of the team
-        channel_id: The ID of the channel
-        tenant_id: Optional tenant ID for cross-tenant scenarios
-        
-    Returns:
-        Channel information dictionary, or None if failed
-    """
-    token = await get_app_token(tenant_id)
-    if not token:
-        return None
+    if conv_type != "channel" or not team_id or not channel_id:
+        return "Not a channel conversation or missing team/channel IDs."
     
-    async with aiohttp.ClientSession() as session:
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
-        
-        async with session.get(
-            f"{GRAPH_BASE_URL}/teams/{team_id}/channels/{channel_id}",
-            headers=headers
-        ) as response:
-            if response.status == 200:
-                return await response.json()
-            else:
-                error_text = await response.text()
-                logger.error(f"Error getting channel info: {response.status} - {error_text}")
-                return None
+    if not is_rsc_enabled():
+        return "RSC is not enabled."
+    
+    user_context = UserContext(context)
+    tenant_id = user_context.user_tenant_id or settings.AZURE_TENANT_ID
+    
+    messages = await get_channel_messages_with_replies(
+        team_id=team_id,
+        channel_id=channel_id,
+        top=max_messages,
+        include_replies=include_replies,
+        tenant_id=tenant_id
+    )
+    
+    return format_messages_for_context(messages, max_messages=max_messages, include_replies=include_replies)
 
 
 async def get_user_by_id(
@@ -418,7 +401,10 @@ async def get_user_by_id(
     Returns:
         User information dictionary, or None if failed
     """
-    token = await get_app_token(tenant_id)
+    if not is_rsc_enabled():
+        return None
+    
+    token = await _get_app_token(tenant_id)
     if not token:
         return None
     
@@ -461,8 +447,6 @@ def format_messages_for_context(
     
     # Take most recent messages (Graph returns newest first)
     recent = messages[:max_messages]
-    
-    import re
     
     def clean_content(content: str) -> str:
         """Clean HTML content and truncate."""

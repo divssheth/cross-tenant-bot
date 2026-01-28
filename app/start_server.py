@@ -30,10 +30,20 @@ async def conditional_jwt_middleware(request: Request, handler: Callable[[Reques
     """
     Custom middleware that conditionally applies JWT authentication.
     Skips JWT validation for health check endpoints while requiring it for API endpoints.
+    Skips all JWT validation if LOCAL_DEBUG=true.
     """
+    # Check if LOCAL_DEBUG mode is enabled
+    local_debug = os.getenv("LOCAL_DEBUG", "false").lower() == "true"
+    
     # Skip JWT validation for health check endpoints
     if request.path in HEALTH_CHECK_PATHS:
         logger.debug(f"Bypassing JWT auth for health check endpoint: {request.path}")
+        return await handler(request)
+    
+    # Skip JWT validation entirely in LOCAL_DEBUG mode
+    if local_debug:
+        logger.debug(f"LOCAL_DEBUG=true - Bypassing JWT auth for: {request.path}")
+        request["claims_identity"] = None  # Anonymous
         return await handler(request)
     
     # Apply JWT validation for all other endpoints

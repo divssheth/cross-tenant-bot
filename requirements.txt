@@ -14,6 +14,9 @@ azure-identity>=1.13.0
 # Azure Key Vault - for secure client secret retrieval
 azure-keyvault-secrets>=4.7.0
 
+# Microsoft Agent Framework - for AI Agent capabilities
+agent-framework[azure]>=1.0.0b260123
+
 # Async HTTP client
 aiohttp>=3.8.0
 

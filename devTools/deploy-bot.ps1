@@ -7,13 +7,14 @@
     - Deploy the complete infrastructure (ACR, Container Apps Environment, Container App)
     - Redeploy/update the bot code to the existing Container App
     - Verify the deployment and configuration
+    - Create Teams app packages
     - Troubleshoot common issues
 
     The bot uses UAMI for authentication which eliminates the need for client secrets.
+    Configuration is read from .env file in project root.
 
 .NOTES
     Author: Divyesh
-    Bot Name: tescobotappdivye
     Created: January 2026
     
     Prerequisites:
@@ -32,6 +33,11 @@
     Redeploy-BotCode -ImageTag "v3"
 
 .EXAMPLE
+    # Create Teams package
+    .\deploy-bot.ps1
+    Create-TeamsPackage
+
+.EXAMPLE
     # Verify deployment
     .\deploy-bot.ps1
     Verify-BotDeployment
@@ -41,23 +47,62 @@
 # CONFIGURATION VARIABLES
 # =============================================================================
 
-# Resource Group & Location
-$script:RESOURCE_GROUP = "tesco-bot-rg"
-$script:LOCATION = "eastus"
+# Get project root (parent of devTools)
+$script:PROJECT_ROOT = Split-Path $PSScriptRoot -Parent
+$script:ENV_FILE = Join-Path $script:PROJECT_ROOT ".env"
+
+# Function to load configuration from .env file
+function Get-EnvConfig {
+    <#
+    .SYNOPSIS
+        Loads configuration from .env file.
+    #>
+    $config = @{}
+    
+    if (Test-Path $script:ENV_FILE) {
+        Get-Content $script:ENV_FILE | ForEach-Object {
+            $line = $_.Trim()
+            if ($line -and -not $line.StartsWith("#")) {
+                $parts = $line -split "=", 2
+                if ($parts.Count -eq 2) {
+                    $key = $parts[0].Trim()
+                    $value = $parts[1].Trim() -replace '^["'']|["'']$', ''
+                    $config[$key] = $value
+                }
+            }
+        }
+        Write-Host "Loaded configuration from: $($script:ENV_FILE)" -ForegroundColor Gray
+    } else {
+        Write-Warning ".env file not found at: $($script:ENV_FILE)"
+    }
+    
+    return $config
+}
+
+# Load configuration
+$script:EnvConfig = Get-EnvConfig
+
+# Resource Group & Location (from .env or defaults)
+$script:RESOURCE_GROUP = if ($script:EnvConfig["RESOURCE_GROUP"]) { $script:EnvConfig["RESOURCE_GROUP"] } else { "tesco-bot-rg" }
+$script:LOCATION = if ($script:EnvConfig["AZURE_LOCATION"]) { $script:EnvConfig["AZURE_LOCATION"] } else { "eastus" }
 
 # Azure Container Registry
-$script:ACR_NAME = "crosstenantbotacr"  # Must be globally unique, lowercase
+$script:ACR_NAME = if ($script:EnvConfig["ACR_NAME"]) { $script:EnvConfig["ACR_NAME"] } else { "crosstenantbotacr" }
 
 # Container Apps
-$script:CONTAINER_ENV_NAME = "crosstenant-bot-env"
-$script:CONTAINER_APP_NAME = "crosstenant-bot-app"
+$script:CONTAINER_ENV_NAME = if ($script:EnvConfig["CONTAINER_ENV_NAME"]) { $script:EnvConfig["CONTAINER_ENV_NAME"] } else { "crosstenant-bot-env" }
+$script:CONTAINER_APP_NAME = if ($script:EnvConfig["CONTAINER_APP_NAME"]) { $script:EnvConfig["CONTAINER_APP_NAME"] } else { "crosstenant-bot-app" }
 
 # User Assigned Managed Identity
-$script:UAMI_NAME = "tescobot"
+$script:UAMI_NAME = if ($script:EnvConfig["UAMI_NAME"]) { $script:EnvConfig["UAMI_NAME"] } else { "tescobot" }
 
 # Bot Configuration
-$script:BOT_NAME = "tescobotdivnp"
-$script:BOT_APP_ID = "631cc7ce-2a7b-4d31-9ae0-3a5faa984d73"
+$script:BOT_NAME = if ($script:EnvConfig["BOT_NAME"]) { $script:EnvConfig["BOT_NAME"] } else { "tescobotdivnp" }
+$script:BOT_APP_ID = if ($script:EnvConfig["MICROSOFT_APP_ID"]) { $script:EnvConfig["MICROSOFT_APP_ID"] } else { "" }
+
+# Feature Flags
+$script:ENABLE_RSC = $script:EnvConfig["ENABLE_RSC"] -eq "true"
+$script:ENABLE_AI = $script:EnvConfig["ENABLE_AI"] -ne "false"  # Default true
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -195,6 +240,34 @@ function Deploy-BotInfrastructure {
     $tenantId = az account show --query tenantId -o tsv
 
     Write-Step "Step 5: Creating Container App"
+    
+    # Build environment variables list
+    $envVarsList = @(
+        "LOCAL_DEBUG=false",
+        "AZURE_CLIENT_ID=$($uami.ClientId)",
+        "AZURE_TENANT_ID=$tenantId",
+        "MICROSOFT_APP_ID=$script:BOT_APP_ID",
+        "CONTAINER_APP_NAME=$script:CONTAINER_APP_NAME",
+        "ENABLE_RSC=$($script:ENABLE_RSC.ToString().ToLower())",
+        "ENABLE_AI=$($script:ENABLE_AI.ToString().ToLower())"
+    )
+    
+    # Add AI configuration if enabled
+    if ($script:ENABLE_AI -and $script:EnvConfig["AZURE_AI_PROJECT_ENDPOINT"]) {
+        $envVarsList += "AZURE_AI_PROJECT_ENDPOINT=$($script:EnvConfig['AZURE_AI_PROJECT_ENDPOINT'])"
+        $envVarsList += "AZURE_AI_MODEL_DEPLOYMENT=$($script:EnvConfig['AZURE_AI_MODEL_DEPLOYMENT'])"
+    }
+    
+    # Add RSC configuration if enabled
+    if ($script:ENABLE_RSC) {
+        if ($script:EnvConfig["GRAPH_APP_ID"]) {
+            $envVarsList += "GRAPH_APP_ID=$($script:EnvConfig['GRAPH_APP_ID'])"
+        }
+        if ($script:EnvConfig["KEY_VAULT_NAME"]) {
+            $envVarsList += "KEY_VAULT_NAME=$($script:EnvConfig['KEY_VAULT_NAME'])"
+        }
+    }
+    
     az containerapp create `
         --name $script:CONTAINER_APP_NAME `
         --resource-group $script:RESOURCE_GROUP `
@@ -207,11 +280,7 @@ function Deploy-BotInfrastructure {
         --user-assigned $uami.Id `
         --registry-server $acr.LoginServer `
         --registry-identity $uami.Id `
-        --env-vars `
-            "AZURE_CLIENT_ID=$($uami.ClientId)" `
-            "AZURE_TENANT_ID=$tenantId" `
-            "MICROSOFT_APP_ID=$script:BOT_APP_ID" `
-            "CONTAINER_APP_NAME=$script:CONTAINER_APP_NAME"
+        --set-env-vars @envVarsList
     
     if ($LASTEXITCODE -eq 0) { 
         Write-Success "Container App created: $script:CONTAINER_APP_NAME"
@@ -532,6 +601,107 @@ function Get-BotEndpoint {
     }
 }
 
+function New-TeamsPackage {
+    <#
+    .SYNOPSIS
+        Creates a Teams app package using the Create-TeamsPackage.ps1 script.
+    
+    .DESCRIPTION
+        Wrapper function that calls the Create-TeamsPackage.ps1 script
+        to generate a Teams app manifest package.
+    
+    .EXAMPLE
+        New-TeamsPackage
+    #>
+    
+    Write-Step "Creating Teams App Package"
+    
+    $packageScript = Join-Path $PSScriptRoot "Create-TeamsPackage.ps1"
+    
+    if (Test-Path $packageScript) {
+        & $packageScript
+    } else {
+        Write-Error "Create-TeamsPackage.ps1 not found at: $packageScript"
+    }
+}
+
+function Deploy-Complete {
+    <#
+    .SYNOPSIS
+        Performs a complete deployment: build, deploy, and create Teams package.
+    
+    .PARAMETER ImageTag
+        The tag for the Docker image.
+    
+    .EXAMPLE
+        Deploy-Complete -ImageTag "v1"
+    #>
+    param(
+        [string]$ImageTag = "v$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    )
+    
+    Write-Host "`n" -NoNewline
+    Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║  COMPLETE DEPLOYMENT                                          ║" -ForegroundColor Cyan
+    Write-Host "╠═══════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Image Tag: $ImageTag" -ForegroundColor Cyan
+    Write-Host "║  RSC Enabled: $($script:ENABLE_RSC)" -ForegroundColor Cyan
+    Write-Host "║  AI Enabled: $($script:ENABLE_AI)" -ForegroundColor Cyan
+    Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    
+    # Step 1: Redeploy code
+    Redeploy-BotCode -ImageTag $ImageTag
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Deployment failed. Aborting."
+        return
+    }
+    
+    # Step 2: Create Teams package
+    Write-Host "`n"
+    New-TeamsPackage
+    
+    # Step 3: Show summary
+    Write-Host "`n"
+    Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Green
+    Write-Host "║  COMPLETE DEPLOYMENT FINISHED!                                ║" -ForegroundColor Green
+    Write-Host "╠═══════════════════════════════════════════════════════════════╣" -ForegroundColor Green
+    Write-Host "║  Next Steps:                                                  ║" -ForegroundColor Green
+    Write-Host "║  1. Upload Teams package to Teams Admin Center                ║" -ForegroundColor Green
+    Write-Host "║  2. Install the app to your team/users                        ║" -ForegroundColor Green
+    Write-Host "║  3. Test the bot with /help command                           ║" -ForegroundColor Green
+    Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+}
+
+function Show-Config {
+    <#
+    .SYNOPSIS
+        Displays current configuration loaded from .env file.
+    #>
+    
+    Write-Host "`n" -NoNewline
+    Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║  CURRENT CONFIGURATION                                        ║" -ForegroundColor Cyan
+    Write-Host "╠═══════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Source: $($script:ENV_FILE)" -ForegroundColor Cyan
+    Write-Host "╠═══════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Azure Resources:" -ForegroundColor Yellow
+    Write-Host "║    Resource Group:    $($script:RESOURCE_GROUP)" -ForegroundColor White
+    Write-Host "║    Location:          $($script:LOCATION)" -ForegroundColor White
+    Write-Host "║    ACR:               $($script:ACR_NAME)" -ForegroundColor White
+    Write-Host "║    Container App:     $($script:CONTAINER_APP_NAME)" -ForegroundColor White
+    Write-Host "║    UAMI:              $($script:UAMI_NAME)" -ForegroundColor White
+    Write-Host "╠═══════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Bot Configuration:" -ForegroundColor Yellow
+    Write-Host "║    Bot Name:          $($script:BOT_NAME)" -ForegroundColor White
+    Write-Host "║    Bot App ID:        $($script:BOT_APP_ID)" -ForegroundColor White
+    Write-Host "╠═══════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Feature Flags:" -ForegroundColor Yellow
+    Write-Host "║    RSC Enabled:       $($script:ENABLE_RSC)" -ForegroundColor $(if ($script:ENABLE_RSC) { "Green" } else { "Gray" })
+    Write-Host "║    AI Enabled:        $($script:ENABLE_AI)" -ForegroundColor $(if ($script:ENABLE_AI) { "Green" } else { "Gray" })
+    Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+}
+
 # =============================================================================
 # QUICK REFERENCE
 # =============================================================================
@@ -547,6 +717,16 @@ function Show-Help {
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                    CROSS-TENANT BOT DEPLOYMENT SCRIPT                         ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
+║  Configuration is loaded from: .env file in project root                     ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║                                                                               ║
+║  QUICK START:                                                                 ║
+║  ────────────                                                                 ║
+║    Deploy-Complete [-ImageTag "v1"]                                           ║
+║        Full deployment + Teams package creation (recommended)                 ║
+║                                                                               ║
+║    Show-Config                                                                ║
+║        Display current configuration from .env file                           ║
 ║                                                                               ║
 ║  DEPLOYMENT FUNCTIONS:                                                        ║
 ║  ─────────────────────                                                        ║
@@ -559,6 +739,11 @@ function Show-Help {
 ║    Update-BotEnvironmentVariables [-EnvFile "env.prod"]                       ║
 ║        Update env vars without rebuilding image                               ║
 ║                                                                               ║
+║  TEAMS PACKAGE:                                                               ║
+║  ──────────────                                                               ║
+║    New-TeamsPackage                                                           ║
+║        Create Teams app package (uses ENABLE_RSC flag for template)           ║
+║                                                                               ║
 ║  VERIFICATION FUNCTIONS:                                                      ║
 ║  ───────────────────────                                                      ║
 ║    Verify-BotDeployment                                                       ║
@@ -570,13 +755,10 @@ function Show-Help {
 ║    Get-BotLogs [-Follow] [-Tail 100]                                          ║
 ║        View Container App logs                                                ║
 ║                                                                               ║
-║  CONFIGURATION:                                                               ║
-║  ──────────────                                                               ║
-║    Resource Group:    $script:RESOURCE_GROUP                                          ║
-║    Container App:     $script:CONTAINER_APP_NAME                                  ║
-║    ACR:               $script:ACR_NAME                                      ║
-║    UAMI:              $script:UAMI_NAME                                               ║
-║    Bot App ID:        $script:BOT_APP_ID                          ║
+║  FEATURE FLAGS (from .env):                                                   ║
+║  ──────────────────────────                                                   ║
+║    ENABLE_RSC=$($script:ENABLE_RSC.ToString().ToLower())    - Channel message access via Graph API                  ║
+║    ENABLE_AI=$($script:ENABLE_AI.ToString().ToLower())     - AI-powered responses                               ║
 ║                                                                               ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 
@@ -585,3 +767,5 @@ function Show-Help {
 
 # Show help on script load
 Write-Host "`nBot Deployment Script Loaded. Type 'Show-Help' for available commands." -ForegroundColor Green
+Write-Host "Configuration loaded from: $($script:ENV_FILE)" -ForegroundColor Gray
+Write-Host "RSC: $($script:ENABLE_RSC) | AI: $($script:ENABLE_AI)" -ForegroundColor Gray

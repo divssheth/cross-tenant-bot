@@ -1,0 +1,74 @@
+{
+    "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+    "manifestVersion": "1.16",
+    "version": "{{APP_VERSION}}",
+    "id": "{{BOT_APP_ID}}",
+    "packageName": "{{PACKAGE_NAME}}",
+    "developer": {
+        "name": "{{DEVELOPER_NAME}}",
+        "websiteUrl": "{{DEVELOPER_WEBSITE_URL}}",
+        "privacyUrl": "{{DEVELOPER_PRIVACY_URL}}",
+        "termsOfUseUrl": "{{DEVELOPER_TERMS_URL}}"
+    },
+    "name": {
+        "short": "{{APP_SHORT_NAME}}",
+        "full": "{{APP_FULL_NAME}}"
+    },
+    "description": {
+        "short": "{{APP_SHORT_DESCRIPTION}}",
+        "full": "{{APP_FULL_DESCRIPTION}}"
+    },
+    "icons": {
+        "color": "color.png",
+        "outline": "outline.png"
+    },
+    "accentColor": "{{ACCENT_COLOR}}",
+    "bots": [
+        {
+            "botId": "{{BOT_APP_ID}}",
+            "scopes": ["personal", "team", "groupChat"],
+            "supportsFiles": false,
+            "isNotificationOnly": false,
+            "commandLists": [
+                {
+                    "scopes": ["personal", "team", "groupChat"],
+                    "commands": [
+                        {
+                            "title": "help",
+                            "description": "Show available commands"
+                        },
+                        {
+                            "title": "status",
+                            "description": "Show bot status and configuration"
+                        },
+                        {
+                            "title": "info",
+                            "description": "Show user and tenant information"
+                        },
+                        {
+                            "title": "context",
+                            "description": "Show conversation context"
+                        },
+                        {
+                            "title": "echo",
+                            "description": "Echo back your message"
+                        },
+                        {
+                            "title": "ask",
+                            "description": "Ask AI a question about conversation"
+                        },
+                        {
+                            "title": "summarize",
+                            "description": "Get AI summary of conversation"
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "permissions": [
+        "identity",
+        "messageTeamMembers"
+    ],
+    "validDomains": ["{{VALID_DOMAIN}}"]
+}

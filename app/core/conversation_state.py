@@ -10,19 +10,19 @@ For channels, historical messages are retrieved from Graph API using RSC.
 
 No user authentication is required - this uses in-memory state and application
 permissions for Graph API.
+
+This is part of the core infrastructure and should not need modification.
 """
 
-import os
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass, field
 from collections import deque
 
-logger = logging.getLogger(__name__)
+from app.config.settings import settings
 
-# Maximum messages to store per conversation
-MAX_CONTEXT_MESSAGES = int(os.getenv("MAX_CONTEXT_MESSAGES", "20"))
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -62,7 +62,7 @@ class ConversationState:
     team_id: Optional[str] = None
     channel_id: Optional[str] = None
     tenant_id: Optional[str] = None
-    messages: deque = field(default_factory=lambda: deque(maxlen=MAX_CONTEXT_MESSAGES))
+    messages: deque = field(default_factory=lambda: deque(maxlen=settings.MAX_CONTEXT_MESSAGES))
     created_at: datetime = field(default_factory=datetime.now)
     last_activity: datetime = field(default_factory=datetime.now)
     
@@ -106,7 +106,7 @@ class ConversationStateManager:
     def __init__(self):
         """Initialize the conversation state manager."""
         self._conversations: Dict[str, ConversationState] = {}
-        logger.info(f"ConversationStateManager initialized (max {MAX_CONTEXT_MESSAGES} messages per conversation)")
+        logger.info(f"ConversationStateManager initialized (max {settings.MAX_CONTEXT_MESSAGES} messages per conversation)")
     
     def get_or_create_conversation(
         self,
@@ -261,7 +261,7 @@ class ConversationStateManager:
             "group_chats": group,
             "channels": channel,
             "total_messages_stored": total_messages,
-            "max_messages_per_conversation": MAX_CONTEXT_MESSAGES
+            "max_messages_per_conversation": settings.MAX_CONTEXT_MESSAGES
         }
 
 
