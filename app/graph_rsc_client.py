@@ -23,10 +23,60 @@ import os
 import asyncio
 import aiohttp
 import logging
+import base64
+import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
+
+
+def decode_token_claims(token: str) -> Dict[str, Any]:
+    """
+    Decode JWT token to inspect claims (without verification).
+    Useful for debugging permission issues.
+    """
+    try:
+        # JWT has 3 parts: header.payload.signature
+        parts = token.split('.')
+        if len(parts) != 3:
+            return {"error": "Invalid JWT format"}
+        
+        # Decode payload (2nd part) - add padding if needed
+        payload = parts[1]
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += '=' * padding
+        
+        decoded = base64.urlsafe_b64decode(payload)
+        return json.loads(decoded)
+    except Exception as e:
+        return {"error": f"Failed to decode token: {e}"}
+
+
+def log_token_claims(token: str, logger) -> None:
+    """
+    Log key token claims for debugging RSC permission issues.
+    
+    Key things to check:
+    - 'appid': Should match webApplicationInfo.id in manifest
+    - 'roles': Should be empty [] for RSC to work (no Azure AD app permissions)
+    - 'tid': Should match the tenant where the team exists
+    """
+    claims = decode_token_claims(token)
+    if "error" in claims:
+        logger.error(f"Failed to decode token: {claims['error']}")
+        return
+    
+    # Check for Azure AD roles that would override RSC
+    roles = claims.get('roles', [])
+    if roles:
+        logger.warning(f"Token has Azure AD roles: {roles} - these may override RSC!")
+        logger.warning("Remove API permissions from Azure AD app registration to use RSC")
+    
+    logger.debug(f"Token claims: appid={claims.get('appid')}, tid={claims.get('tid')}, roles={roles}")
+
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
@@ -180,15 +230,30 @@ async def get_channel_messages_rsc(
     
     REQUIRES: ChannelMessage.Read.Group RSC permission (granted at team install)
     
+    IMPORTANT:
+    - team_id must be the M365 Group ID (GUID format), NOT 19:xxx format
+    - channel_id should be in format 19:xxx@thread.tacv2
+    - RSC requires the /beta endpoint for channel messages
+    
     Args:
-        team_id: The ID of the team
-        channel_id: The ID of the channel
+        team_id: The M365 Group ID of the team (GUID format)
+        channel_id: The ID of the channel (19:xxx@thread.tacv2)
         top: Maximum number of messages to retrieve (default 50)
         tenant_id: Optional tenant ID for cross-tenant scenarios
         
     Returns:
         List of message dictionaries
     """
+    if not team_id:
+        logger.error("team_id (M365 Group ID) is required for Graph API access")
+        return []
+    
+    if not channel_id or not channel_id.startswith("19:"):
+        logger.warning(f"channel_id '{channel_id}' may not be in expected format (should start with '19:')")
+    
+    # URL encode the channel_id since it contains special characters like @ and :
+    encoded_channel_id = quote(channel_id, safe='')
+    
     token = await get_app_token(tenant_id)
     if not token:
         logger.error("Could not get app token for channel messages")
@@ -201,23 +266,22 @@ async def get_channel_messages_rsc(
         }
         
         # RSC permissions require the BETA endpoint for channel messages
-        url = f"https://graph.microsoft.com/beta/teams/{team_id}/channels/{channel_id}/messages?$top={top}"
+        url = f"https://graph.microsoft.com/beta/teams/{team_id}/channels/{encoded_channel_id}/messages?$top={top}"
         
-        # Log the request details for debugging RSC issues
-        logger.info(f"RSC Request - Team: {team_id}, Channel: {channel_id}, Tenant: {tenant_id}")
-        logger.debug(f"RSC URL: {url}")
+        logger.debug(f"Fetching channel messages: team={team_id}, channel={channel_id[:20]}...")
         
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
                 data = await response.json()
                 messages = data.get("value", [])
-                logger.info(f"Retrieved {len(messages)} messages from channel {channel_id[:8]}...")
+                logger.info(f"Retrieved {len(messages)} messages from channel")
                 return messages
             elif response.status == 403:
                 error_text = await response.text()
-                logger.error(f"RSC 403 Error - Team: {team_id}, Channel: {channel_id}, Tenant: {tenant_id}")
-                logger.error(f"RSC 403 Response: {error_text}")
-                logger.error("Possible causes: 1) App not installed in this team, 2) RSC not consented, 3) Wrong app ID in webApplicationInfo")
+                logger.error(f"RSC 403 Error: {error_text}")
+                logger.error("Possible causes: 1) App not installed in team, 2) RSC not consented, 3) Wrong team_id format (must be M365 Group GUID)")
+                # Log token claims for debugging when 403 occurs
+                log_token_claims(token, logger)
                 return []
             else:
                 error_text = await response.text()
@@ -254,6 +318,9 @@ async def get_message_replies_rsc(
         logger.error("Could not get app token for message replies")
         return []
     
+    # URL encode the channel_id since it contains special characters
+    encoded_channel_id = quote(channel_id, safe='')
+    
     async with aiohttp.ClientSession() as session:
         headers = {
             "Authorization": f"Bearer {token}",
@@ -261,7 +328,7 @@ async def get_message_replies_rsc(
         }
         
         # RSC permissions require the BETA endpoint for channel messages
-        url = f"https://graph.microsoft.com/beta/teams/{team_id}/channels/{channel_id}/messages/{message_id}/replies?$top={top}"
+        url = f"https://graph.microsoft.com/beta/teams/{team_id}/channels/{encoded_channel_id}/messages/{message_id}/replies?$top={top}"
         
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
@@ -384,6 +451,9 @@ async def get_channel_info(
     if not token:
         return None
     
+    # URL encode the channel_id since it contains special characters
+    encoded_channel_id = quote(channel_id, safe='')
+    
     async with aiohttp.ClientSession() as session:
         headers = {
             "Authorization": f"Bearer {token}",
@@ -391,7 +461,7 @@ async def get_channel_info(
         }
         
         async with session.get(
-            f"{GRAPH_BASE_URL}/teams/{team_id}/channels/{channel_id}",
+            f"{GRAPH_BASE_URL}/teams/{team_id}/channels/{encoded_channel_id}",
             headers=headers
         ) as response:
             if response.status == 200:

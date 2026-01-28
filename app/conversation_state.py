@@ -302,24 +302,44 @@ def extract_team_channel_ids(activity) -> tuple:
     """
     Extract team and channel IDs from a Teams activity.
     
+    The team_id for Graph API must be the M365 Group ID (GUID format).
+    This is extracted from the 'groupId' parameter in conversation.id.
+    
+    Format: 19:xxx@thread.tacv2;groupId=<M365-GROUP-GUID>;tenantId=<TENANT-GUID>
+    
+    Reference: https://learn.microsoft.com/en-us/microsoftteams/platform/bots/how-to/conversations/channel-and-group-conversations
+    
     Args:
         activity: The incoming activity object
         
     Returns:
         Tuple of (team_id, channel_id), either may be None
     """
+    import re
+    
     team_id = None
     channel_id = None
     
-    if hasattr(activity, 'channel_data') and activity.channel_data:
+    # Extract from conversation.id - this is the reliable source
+    # Format: 19:xxx@thread.tacv2;groupId=<GUID>;tenantId=<GUID>
+    if hasattr(activity, 'conversation') and activity.conversation:
+        conv_id = activity.conversation.id or ''
+        
+        # Extract groupId (M365 Group ID) - required for Graph API
+        group_match = re.search(r'groupId=([a-f0-9-]+)', conv_id, re.IGNORECASE)
+        if group_match:
+            team_id = group_match.group(1)
+        
+        # Extract channel_id (the 19:xxx@thread.tacv2 part)
+        channel_match = re.search(r'(19:[^;]+)', conv_id)
+        if channel_match:
+            channel_id = channel_match.group(1)
+    
+    # Fallback: try channel_data.channel.id for channel_id if not found
+    if not channel_id and hasattr(activity, 'channel_data') and activity.channel_data:
         channel_data = activity.channel_data
         if isinstance(channel_data, dict):
-            team_data = channel_data.get('team', {})
             channel_data_inner = channel_data.get('channel', {})
-            
-            if isinstance(team_data, dict):
-                team_id = team_data.get('id')
-            
             if isinstance(channel_data_inner, dict):
                 channel_id = channel_data_inner.get('id')
     
