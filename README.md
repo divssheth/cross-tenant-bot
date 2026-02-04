@@ -314,15 +314,20 @@ Get-BotEndpoint
 ├── app/
 │   ├── __init__.py
 │   ├── __main__.py           # Bot entry point and message handlers
-│   ├── conversation_state.py  # In-memory conversation tracking
+│   ├── conversation_state.py  # In-memory conversation tracking + team mapping cache
 │   ├── graph_rsc_client.py    # Graph API client with RSC support
 │   ├── log_config.py          # Logging configuration
 │   ├── start_server.py        # aiohttp server startup
 │   └── trace_config.py        # Telemetry configuration
 ├── devTools/
-│   └── deploy-bot.ps1         # Deployment automation script
+│   ├── deploy-bot.ps1         # Deployment automation script
+│   └── Create-AppPackages.ps1 # Creates Teams & Copilot app packages
 ├── TeamsAppPackage/
-│   ├── manifest.json          # Teams app manifest with RSC
+│   ├── manifest.json          # Teams bot manifest template
+│   ├── color.png
+│   └── outline.png
+├── CopilotAppPackage/
+│   ├── manifest.template.json # Copilot agent manifest template
 │   ├── color.png
 │   └── outline.png
 ├── Dockerfile                 # Container image definition
@@ -330,6 +335,58 @@ Get-BotEndpoint
 ├── env.TEMPLATE              # Environment variable template
 └── README.md                 # This file
 ```
+
+---
+
+## Creating App Packages
+
+### Using the Script
+
+The `devTools/Create-AppPackages.ps1` script creates both Teams Bot and Copilot Agent packages:
+
+```powershell
+cd devTools
+
+# Create both packages
+.\Create-AppPackages.ps1
+
+# Create Teams Bot package only
+.\Create-AppPackages.ps1 -TeamsOnly
+
+# Create Copilot Agent package only
+.\Create-AppPackages.ps1 -CopilotOnly
+```
+
+### Output Files
+
+| Package | Location | Description |
+|---------|----------|-------------|
+| Teams Bot | `TeamsAppPackage/CrossTenantBot.zip` | Standard Teams bot for 1:1, group, and channel chats |
+| Copilot Agent | `CopilotAppPackage/CrossTenantAgent.zip` | Custom Engine Agent for Microsoft 365 Copilot |
+
+### Teams Bot vs Copilot Agent
+
+| Feature | Teams Bot | Copilot Agent |
+|---------|-----------|---------------|
+| Manifest Version | 1.16 | 1.22 |
+| Scopes | personal, team, groupChat | personal, team, groupChat, **copilot** |
+| Works in | Teams chats and channels | Microsoft 365 Copilot |
+| Authentication | Bot Service routing | Requires app consent |
+| Multi-tenant | Works via Bot Service | **Requires multi-tenant app registration** |
+| RSC Support | Yes | No (RSC removed for Copilot compatibility) |
+
+### Copilot Agent Requirements
+
+⚠️ **Important:** To use the Copilot Agent in external tenants:
+
+1. **Make your app registration multi-tenant:**
+   - Azure Portal → App Registration → Authentication
+   - Change to: "Accounts in any organizational directory (Any Microsoft Entra ID tenant)"
+   - Save
+
+2. **Users need Microsoft 365 Copilot license**
+
+3. **App must be approved/installed in their tenant**
 
 ---
 
@@ -343,6 +400,7 @@ Get-BotEndpoint
 | `/context` | Show recent conversation context (uses RSC for channels) |
 | `/contextinfo` | Show conversation state details |
 | `/rsctest` | Diagnose RSC permissions (use in a channel) |
+| `/teamcache` | Show team mapping cache status (aadGroupId lookup) |
 
 ---
 

@@ -40,6 +40,8 @@ from app.conversation_state import (
     conversation_manager,
     get_conversation_type_from_activity,
     extract_team_channel_ids,
+    extract_team_info_for_caching,
+    team_mapping_cache,
 )
 from app.graph_rsc_client import (
     get_channel_messages_rsc,
@@ -291,6 +293,9 @@ class CrossTenantBot:
             elif message_lower == "/rsctest":
                 response = await self._handle_rsc_test(context, user_context)
 
+            elif message_lower == "/teamcache":
+                response = await self._handle_team_cache(context)
+
             elif message_lower.startswith("/whois "):
                 user_id = user_message[7:].strip()
                 response = await self._handle_whois(context, user_id)
@@ -321,6 +326,8 @@ class CrossTenantBot:
         Handle conversation update when members are added.
 
         This method is called when members join the conversation.
+        When the bot is added to a team, we cache the aadGroupId mapping
+        for later use when processing channel messages.
         """
         try:
             user_context = UserContext(context)
@@ -330,6 +337,30 @@ class CrossTenantBot:
                 f"User {user_context.user_name} "
                 f"({user_context.user_id}) joined"
             )
+            
+            # Extract and cache team info if this is a team context
+            # The aadGroupId is only available in conversationUpdate events
+            team_info = extract_team_info_for_caching(context.activity)
+            
+            if team_info.get("thread_id") and team_info.get("aad_group_id"):
+                # Cache the mapping for later use
+                team_mapping_cache.add_mapping(
+                    thread_id=team_info["thread_id"],
+                    aad_group_id=team_info["aad_group_id"],
+                    tenant_id=team_info.get("tenant_id"),
+                    team_name=team_info.get("team_name")
+                )
+                logger.info(
+                    f"✅ Team mapping cached successfully: "
+                    f"{team_info['team_name'] or 'Unknown Team'}"
+                )
+            elif team_info.get("thread_id"):
+                # We have a thread_id but no aadGroupId - log this for debugging
+                logger.warning(
+                    f"⚠️ conversationUpdate received but no aadGroupId found. "
+                    f"thread_id: {team_info['thread_id'][:30]}..., "
+                    f"eventType: {team_info.get('event_type')}"
+                )
 
             # Send welcome message
             welcome_message = self._build_welcome_message(user_context)
@@ -355,6 +386,7 @@ class CrossTenantBot:
 • `/context` - Shows recent conversation context
 • `/contextinfo` - Shows conversation state information
 • `/rsctest` - Diagnose RSC permissions (use in a channel)
+• `/teamcache` - Shows team mapping cache status
 
 Or simply type any message and I'll respond.
 """
@@ -582,6 +614,59 @@ _Showing last 10 messages from this conversation_
             logger.error(f"RSC test error: {e}", exc_info=True)
         
         return "\n".join(diagnostics)
+
+    async def _handle_team_cache(self, context: TurnContext) -> str:
+        """
+        Handle /teamcache command - show team mapping cache status.
+        
+        This helps diagnose if the aadGroupId mapping is being cached correctly.
+        """
+        cache_stats = team_mapping_cache.get_stats()
+        
+        # Get current team info from this message
+        team_id, channel_id = extract_team_channel_ids(context.activity)
+        conv_type = get_conversation_type_from_activity(context.activity)
+        
+        # Get thread ID for lookup
+        thread_id = None
+        if hasattr(context.activity, 'channel_data') and context.activity.channel_data:
+            channel_data = context.activity.channel_data
+            if isinstance(channel_data, dict):
+                thread_id = channel_data.get('teamsTeamId')
+                if not thread_id:
+                    team_data = channel_data.get('team', {})
+                    if isinstance(team_data, dict):
+                        thread_id = team_data.get('id')
+        
+        # Check if this team is in cache
+        cached_info = None
+        if thread_id:
+            cached_info = team_mapping_cache.get_mapping_info(thread_id)
+        
+        result = ["**🗂️ Team Mapping Cache Status**\n"]
+        result.append(f"**Cached Teams:** {cache_stats['cached_teams']}")
+        
+        if cache_stats['cached_teams'] > 0:
+            result.append("\n**Cached Mappings:**")
+            for tid, gid in cache_stats['mappings'].items():
+                result.append(f"• `{tid}` → `{gid}`")
+        
+        result.append(f"\n**Current Context:**")
+        result.append(f"• **Conversation Type:** {conv_type}")
+        result.append(f"• **Team ID (GUID):** `{team_id or 'Not found'}`")
+        result.append(f"• **Channel ID:** `{channel_id[:30] + '...' if channel_id and len(channel_id) > 30 else channel_id or 'N/A'}`")
+        result.append(f"• **Thread ID:** `{thread_id[:30] + '...' if thread_id and len(thread_id) > 30 else thread_id or 'N/A'}`")
+        
+        if cached_info:
+            result.append(f"\n✅ **This team IS in cache:**")
+            result.append(f"• AAD Group ID: `{cached_info.get('aad_group_id')}`")
+            result.append(f"• Team Name: {cached_info.get('team_name') or 'Unknown'}")
+            result.append(f"• Cached At: {cached_info.get('cached_at')}")
+        elif thread_id and conv_type == "channel":
+            result.append(f"\n⚠️ **This team is NOT in cache.**")
+            result.append("The bot may need to be removed and re-added to this team to cache the mapping.")
+        
+        return "\n".join(result)
 
     async def _handle_whois(self, context: TurnContext, user_id: str) -> str:
         """

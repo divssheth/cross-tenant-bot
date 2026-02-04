@@ -57,6 +57,10 @@ htmlcov/
 *.zip
 CrossTenantBot.zip
 
+# App package output folders
+TeamsAppPackage/output/
+CopilotAppPackage/output/
+
 # Azure
 .azure/
 
