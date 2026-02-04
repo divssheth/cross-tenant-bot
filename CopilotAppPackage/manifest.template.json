@@ -1,0 +1,54 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.22/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.22",
+  "version": "1.0.0",
+  "id": "${AZURE_CLIENT_ID}",
+  "developer": {
+    "name": "Your Company",
+    "websiteUrl": "https://www.yourcompany.com",
+    "privacyUrl": "https://www.yourcompany.com/privacy",
+    "termsOfUseUrl": "https://www.yourcompany.com/terms"
+  },
+  "name": {
+    "short": "Cross-Tenant Agent",
+    "full": "Cross-Tenant Agent"
+  },
+  "description": {
+    "short": "Cross-Tenant Agent with RSC Context",
+    "full": "Cross-Tenant Agent with RSC Context"
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0078D4",
+  "validDomains": [],
+  "webApplicationInfo": {
+    "id": "${AZURE_CLIENT_ID}",
+    "resource": "api://crosstenantagent"
+  },
+  "bots": [
+    {
+      "botId": "${AZURE_CLIENT_ID}",
+      "scopes": [
+        "personal",
+        "team",
+        "groupChat",
+        "copilot"
+      ],
+      "supportsFiles": true,
+      "isNotificationOnly": false
+    }
+  ],
+  "copilotAgents": {
+    "customEngineAgents": [
+      {
+        "id": "${AZURE_CLIENT_ID}",
+        "type": "bot",
+        "disclaimer": {
+          "text": "This agent uses AI. Please verify important information."
+        }
+      }
+    ]
+  }
+}
