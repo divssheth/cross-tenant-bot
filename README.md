@@ -213,7 +213,7 @@ Ensure your `manifest.json` has:
 
 ## Deployment Script
 
-The `devTools/deploy-bot.ps1` script automates deployment to Azure Container Apps.
+The `scripts/deploy-bot.ps1` script automates deployment to Azure Container Apps.
 
 ### Prerequisites
 
@@ -239,7 +239,7 @@ $script:BOT_APP_ID = "your-graph-app-id"         # Multi-tenant app ID (GRAPH_AP
 
 ```powershell
 # Load the script
-cd devTools
+cd scripts
 . .\deploy-bot.ps1
 
 # Show available commands
@@ -311,29 +311,38 @@ Get-BotEndpoint
 ## Project Structure
 
 ```
-├── app/
-│   ├── __init__.py
-│   ├── __main__.py           # Bot entry point and message handlers
-│   ├── conversation_state.py  # In-memory conversation tracking + team mapping cache
-│   ├── graph_rsc_client.py    # Graph API client with RSC support
-│   ├── log_config.py          # Logging configuration
-│   ├── start_server.py        # aiohttp server startup
-│   └── trace_config.py        # Telemetry configuration
-├── devTools/
-│   ├── deploy-bot.ps1         # Deployment automation script
-│   └── Create-AppPackages.ps1 # Creates Teams & Copilot app packages
-├── TeamsAppPackage/
-│   ├── manifest.json          # Teams bot manifest template
-│   ├── color.png
-│   └── outline.png
-├── CopilotAppPackage/
-│   ├── manifest.template.json # Copilot agent manifest template
-│   ├── color.png
-│   └── outline.png
-├── Dockerfile                 # Container image definition
-├── requirements.txt           # Python dependencies
-├── env.TEMPLATE              # Environment variable template
-└── README.md                 # This file
+├── src/
+│   └── app/
+│       ├── __init__.py
+│       ├── __main__.py           # Bot entry point and message handlers
+│       ├── agents/               # AI agent clients
+│       │   └── foundry_agent_client.py
+│       ├── eval/                 # Agent evaluation framework
+│       │   ├── evaluate_agent.py
+│       │   └── test_data.json
+│       ├── conversation_state.py  # In-memory conversation tracking + team mapping cache
+│       ├── graph_rsc_client.py    # Graph API client with RSC support
+│       ├── log_config.py          # Logging configuration
+│       ├── start_server.py        # aiohttp server startup
+│       └── trace_config.py        # Telemetry configuration
+├── packages/
+│   ├── teams/                     # Teams bot manifest
+│   │   ├── manifest.json
+│   │   ├── color.png
+│   │   └── outline.png
+│   └── copilot/                   # M365 Copilot agent manifest
+│       ├── manifest.template.json
+│       ├── color.png
+│       └── outline.png
+├── scripts/
+│   ├── deploy-bot.ps1             # Deployment automation script
+│   └── Create-AppPackages.ps1     # Creates Teams & Copilot app packages
+├── docs/                          # Documentation
+├── tests/                         # Unit tests (future)
+├── Dockerfile                     # Container image definition
+├── requirements.txt               # Python dependencies
+├── env.TEMPLATE                   # Environment variable template
+└── README.md                      # This file
 ```
 
 ---
@@ -342,10 +351,10 @@ Get-BotEndpoint
 
 ### Using the Script
 
-The `devTools/Create-AppPackages.ps1` script creates both Teams Bot and Copilot Agent packages:
+The `scripts/Create-AppPackages.ps1` script creates both Teams Bot and Copilot Agent packages:
 
 ```powershell
-cd devTools
+cd scripts
 
 # Create both packages
 .\Create-AppPackages.ps1
@@ -361,8 +370,8 @@ cd devTools
 
 | Package | Location | Description |
 |---------|----------|-------------|
-| Teams Bot | `TeamsAppPackage/CrossTenantBot.zip` | Standard Teams bot for 1:1, group, and channel chats |
-| Copilot Agent | `CopilotAppPackage/CrossTenantAgent.zip` | Custom Engine Agent for Microsoft 365 Copilot |
+| Teams Bot | `packages/teams/CrossTenantBot.zip` | Standard Teams bot for 1:1, group, and channel chats |
+| Copilot Agent | `packages/copilot/CrossTenantAgent.zip` | Custom Engine Agent for Microsoft 365 Copilot |
 
 ### Teams Bot vs Copilot Agent
 
@@ -468,16 +477,180 @@ RSC permissions are declared in the Teams manifest and granted at app install ti
 
 ## Environment Variables Reference
 
+### Core Bot Authentication
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AZURE_CLIENT_ID` | Yes | UAMI Client ID (also used as Bot App ID) |
 | `MICROSOFT_APP_ID` | Yes | Same as AZURE_CLIENT_ID for UAMI bots |
 | `AZURE_TENANT_ID` | Yes | Your home tenant ID |
-| `MICROSOFT_APP_TYPE` | Yes | Always `SingleTenant` for UAMI bots |
+| `MicrosoftAppType` | Yes | Set to `UserAssignedMsi` for UAMI bots |
+| `PORT` | No | Server port (default: `3978`) |
+| `LOCAL_DEBUG` | No | Set to `true` for local development with AzureCliCredential |
+
+### Microsoft Graph API (RSC)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GRAPH_TENANT_ID` | Yes | Target tenant ID for Graph API calls |
 | `GRAPH_APP_ID` | Yes | Multi-tenant app registration Client ID |
 | `KEY_VAULT_NAME` | Yes | Azure Key Vault name |
 | `GRAPH_CLIENT_SECRET_NAME` | No | Secret name in Key Vault (default: `graph-client-secret`) |
-| `PORT` | No | Server port (default: `3978`) |
+| `ENABLE_RSC` | No | Enable RSC features (default: `false`) |
+
+### Azure AI Foundry (Agent Framework)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AZURE_AI_ENDPOINT` | Yes | Azure OpenAI endpoint (e.g., `https://your-resource.openai.azure.com/`) |
+| `AZURE_AI_MODEL` | Yes | Model deployment name (e.g., `gpt-4o`) |
+| `AZURE_AI_AGENT_NAME` | No | Agent name (default: `teams-bot-agent`) |
+| `AZURE_AI_MAX_TOKENS` | No | Max tokens for responses (default: `1000`) |
+| `AZURE_AI_PROJECT_ENDPOINT` | No | Foundry project endpoint for evaluations (format: `https://<account>.services.ai.azure.com/api/projects/<project>`) |
+
+### Azure AI Search (Knowledge Base)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AZURE_SEARCH_ENDPOINT` | No | Azure AI Search endpoint for knowledge base |
+| `AZURE_SEARCH_INDEX_NAME` | No | Index name in Azure AI Search |
+
+### Telemetry (Application Insights)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | No | Connection string from Application Insights for telemetry |
+
+### Conversation Settings
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MAX_CONTEXT_MESSAGES` | No | Max messages in conversation state (default: `20`) |
+| `MAX_GRAPH_MESSAGES` | No | Max messages from Graph API (default: `50`) |
+
+---
+
+## Azure AI Foundry Agent Integration
+
+This bot uses **Microsoft Agent Framework** to connect to Azure AI Foundry, providing:
+
+- **Persistent agent registration** in Foundry
+- **Foundry-native observability** with automatic tracing
+- **Web search tool** for real-time information (Bing grounding)
+- **Knowledge base integration** via Azure AI Search
+
+### Agent Configuration
+
+The agent is configured in [src/app/agents/foundry_agent_client.py](src/app/agents/foundry_agent_client.py):
+
+```python
+from agent_framework import ChatAgent, HostedWebSearchTool, HostedMCPTool
+from agent_framework.azure import AzureOpenAIResponsesClient
+
+# Agent is configured via environment variables
+# AZURE_AI_ENDPOINT, AZURE_AI_MODEL, AZURE_AI_AGENT_NAME
+```
+
+### Local Development
+
+For local development, set `LOCAL_DEBUG=true` to use your Azure CLI credentials:
+
+```bash
+# Login to Azure CLI (use the correct tenant)
+az login --tenant YOUR_TENANT_ID
+
+# Set local debug mode
+echo "LOCAL_DEBUG=true" >> .env
+```
+
+---
+
+## Running Agent Evaluations
+
+The project includes a comprehensive evaluation framework in [src/app/eval/](src/app/eval/):
+
+### Quick Start
+
+```bash
+cd src/app/eval
+
+# Run all evaluations locally
+python evaluate_agent.py
+
+# Run evaluations and log to Foundry Portal
+python evaluate_agent.py --log-to-foundry
+
+# Include agent-specific evaluators
+python evaluate_agent.py --log-to-foundry --include-agent-evals
+```
+
+### Evaluation Types
+
+| Type | Description |
+|------|-------------|
+| Single-turn | Individual question/answer pairs |
+| Multi-turn | Conversational sequences |
+
+### Built-in Evaluators
+
+**Quality Evaluators:**
+- Coherence, Fluency, Relevance, Groundedness
+
+**Safety Evaluators:**
+- Violence detection
+
+**Agent Evaluators** (with `--include-agent-evals`):
+- Tool Call Accuracy, Tool Call Success, Tool Input Accuracy
+- Tool Output Utilization, Tool Selection, Task Completion
+
+### CLI Options
+
+```bash
+python evaluate_agent.py --help
+
+Options:
+  --log-to-foundry       Log results to Foundry Portal
+  --include-agent-evals  Include agent-specific evaluators
+  --single-turn-only     Run only single-turn evaluations
+  --multi-turn-only      Run only multi-turn evaluations
+  --category CATEGORY    Filter by test category
+  --evaluation-name NAME Custom evaluation name
+```
+
+See [test_data.json](src/app/eval/test_data.json) for evaluation test cases.
+
+---
+
+## Telemetry & Observability
+
+The bot includes comprehensive observability with Azure Monitor and Application Insights.
+
+### Configuration
+
+Telemetry is automatically enabled when `APPLICATIONINSIGHTS_CONNECTION_STRING` is set:
+
+```python
+# src/app/trace_config.py
+from azure.monitor.opentelemetry import configure_azure_monitor
+
+configure_azure_monitor(
+    connection_string=os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"),
+    enable_live_metrics=True,
+)
+```
+
+### Features
+
+- **Distributed tracing** - Track requests across bot and agent
+- **Structured logging** - Contextual logs with conversation IDs
+- **Custom metrics** - Track agent response times, tool usage
+- **Live metrics** - Real-time performance monitoring
+
+### Documentation
+
+For detailed guidance, see:
+- [Observability Best Practices](docs/OBSERVABILITY_BEST_PRACTICES.md) - Comprehensive guide
+- [Observability Cheatsheet](docs/OBSERVABILITY_CHEATSHEET.md) - Quick reference
 
 ---
 

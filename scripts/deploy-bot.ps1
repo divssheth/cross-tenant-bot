@@ -244,9 +244,13 @@ function Redeploy-BotCode {
         It will:
         1. Build a new Docker image in ACR
         2. Update the Container App to use the new image
+        3. Optionally sync environment variables from .env file
     
     .PARAMETER ImageTag
         The tag for the new Docker image. Defaults to timestamp-based tag.
+    
+    .PARAMETER SyncEnv
+        If specified, syncs environment variables from .env file after deploying.
     
     .EXAMPLE
         Redeploy-BotCode
@@ -255,9 +259,14 @@ function Redeploy-BotCode {
     .EXAMPLE
         Redeploy-BotCode -ImageTag "v3"
         # Uses specific tag "v3"
+    
+    .EXAMPLE
+        Redeploy-BotCode -SyncEnv
+        # Deploy code AND sync all .env variables to ACA
     #>
     param(
-        [string]$ImageTag = "v$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        [string]$ImageTag = "v$(Get-Date -Format 'yyyyMMdd-HHmmss')",
+        [switch]$SyncEnv
     )
 
     Write-Step "Redeploying Bot Code"
@@ -291,6 +300,12 @@ function Redeploy-BotCode {
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Container App updated to image: crosstenant-bot:$ImageTag"
         
+        # Sync environment variables if requested
+        if ($SyncEnv) {
+            Write-Step "Step 3: Syncing Environment Variables"
+            Update-BotEnvironmentVariables -EnvFile ".env"
+        }
+        
         # Get the FQDN
         $fqdn = az containerapp show `
             --name $script:CONTAINER_APP_NAME `
@@ -303,6 +318,9 @@ function Redeploy-BotCode {
         Write-Host "╠═══════════════════════════════════════════════════════════════╣" -ForegroundColor Green
         Write-Host "║  Image: crosstenant-bot:$ImageTag" -ForegroundColor Green
         Write-Host "║  Bot Endpoint: https://$fqdn/api/messages" -ForegroundColor Green
+        if ($SyncEnv) {
+        Write-Host "║  Environment: Synced from .env                                ║" -ForegroundColor Green
+        }
         Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Green
     }
     else {
@@ -313,53 +331,144 @@ function Redeploy-BotCode {
 function Update-BotEnvironmentVariables {
     <#
     .SYNOPSIS
-        Updates the environment variables on the Container App.
+        Updates the environment variables on the Container App from the .env file.
     
     .DESCRIPTION
-        Use this to update environment variables without rebuilding the image.
-        Reads from env.prod file if it exists.
+        Reads all environment variables from the .env file and sets them on the Container App.
+        Skips comments and empty lines. Handles values with special characters.
     
     .PARAMETER EnvFile
-        Path to the environment file. Defaults to "env.prod".
+        Path to the environment file. Defaults to ".env".
+
+    .PARAMETER ExcludeSecrets
+        If specified, excludes variables that appear to be secrets (containing SECRET, PASSWORD, KEY).
     
+    .EXAMPLE
+        Update-BotEnvironmentVariables
+        # Reads from .env file and updates ACA
+
     .EXAMPLE
         Update-BotEnvironmentVariables -EnvFile "env.prod"
     #>
     param(
-        [string]$EnvFile = "env.prod"
+        [string]$EnvFile = ".env",
+        [switch]$ExcludeSecrets
     )
 
-    Write-Step "Updating Environment Variables"
+    Write-Step "Updating Environment Variables from $EnvFile"
 
     if (-not (Test-Path $EnvFile)) {
         Write-Error "Environment file not found: $EnvFile"
         return
     }
 
-    # Parse env file and build env-vars string
+    # Parse env file - collect KEY=VALUE pairs
     $envVars = @()
+    $secretPatterns = @("SECRET", "PASSWORD", "KEY", "TOKEN", "CREDENTIAL")
+    
     Get-Content $EnvFile | ForEach-Object {
         $line = $_.Trim()
+        
         # Skip comments and empty lines
-        if ($line -and -not $line.StartsWith("#")) {
-            $envVars += $line
+        if (-not $line -or $line.StartsWith("#")) {
+            return
+        }
+        
+        # Parse KEY=VALUE
+        $equalIndex = $line.IndexOf("=")
+        if ($equalIndex -gt 0) {
+            $key = $line.Substring(0, $equalIndex).Trim()
+            $value = $line.Substring($equalIndex + 1).Trim()
+            
+            # Skip if excluding secrets and this looks like a secret
+            if ($ExcludeSecrets) {
+                $isSecret = $false
+                foreach ($pattern in $secretPatterns) {
+                    if ($key.ToUpper().Contains($pattern)) {
+                        $isSecret = $true
+                        Write-Info "Skipping secret: $key"
+                        break
+                    }
+                }
+                if ($isSecret) { return }
+            }
+            
+            # Skip empty values
+            if (-not $value) {
+                Write-Info "Skipping empty value: $key"
+                return
+            }
+            
+            # Add to collection
+            $envVars += "$key=$value"
         }
     }
 
-    $envVarsString = $envVars -join " "
-    Write-Info "Found $($envVars.Count) environment variables"
+    if ($envVars.Count -eq 0) {
+        Write-Error "No environment variables found in $EnvFile"
+        return
+    }
 
+    Write-Info "Found $($envVars.Count) environment variables to set"
+    
+    # Display what will be set (mask sensitive values)
+    $envVars | ForEach-Object {
+        $parts = $_ -split "=", 2
+        $key = $parts[0]
+        $value = $parts[1]
+        
+        # Mask sensitive values
+        $displayValue = $value
+        foreach ($pattern in $secretPatterns) {
+            if ($key.ToUpper().Contains($pattern)) {
+                $displayValue = "********"
+                break
+            }
+        }
+        # Truncate long values
+        if ($displayValue.Length -gt 50) {
+            $displayValue = $displayValue.Substring(0, 47) + "..."
+        }
+        Write-Host "   $key = $displayValue" -ForegroundColor DarkGray
+    }
+
+    Write-Info "Applying environment variables to Container App..."
+    
+    # Always force LOCAL_DEBUG=false for ACA deployment (UAMI requires cloud environment)
+    $envVars = $envVars | Where-Object { $_ -notmatch "^LOCAL_DEBUG=" }
+    $envVars += "LOCAL_DEBUG=false"
+    Write-Info "Forcing LOCAL_DEBUG=false for ACA deployment"
+    
+    # Use --set-env-vars with all variables
     az containerapp update `
         --name $script:CONTAINER_APP_NAME `
         --resource-group $script:RESOURCE_GROUP `
-        --set-env-vars $envVars
+        --set-env-vars @envVars
 
     if ($LASTEXITCODE -eq 0) {
-        Write-Success "Environment variables updated"
+        Write-Success "Environment variables updated successfully!"
+        Write-Info "Container App will restart with new environment variables."
     }
     else {
         Write-Error "Failed to update environment variables"
+        Write-Info "Try running with fewer variables or check the .env file format."
     }
+}
+
+function Sync-EnvToACA {
+    <#
+    .SYNOPSIS
+        Quick sync all .env variables to Azure Container App.
+    
+    .DESCRIPTION
+        Convenience function to sync all environment variables from .env to ACA.
+        This is the same as Update-BotEnvironmentVariables with default settings.
+    
+    .EXAMPLE
+        Sync-EnvToACA
+    #>
+    
+    Update-BotEnvironmentVariables -EnvFile ".env"
 }
 
 # =============================================================================
@@ -553,11 +662,17 @@ function Show-Help {
 ║    Deploy-BotInfrastructure [-ImageTag "v1"]                                  ║
 ║        Full deployment: ACR, Container Apps Environment, Container App        ║
 ║                                                                               ║
-║    Redeploy-BotCode [-ImageTag "v2"]                                          ║
+║    Redeploy-BotCode [-ImageTag "v2"] [-SyncEnv]                               ║
 ║        Rebuild image and update Container App (most common operation)         ║
+║        Add -SyncEnv to also sync environment variables from .env              ║
 ║                                                                               ║
-║    Update-BotEnvironmentVariables [-EnvFile "env.prod"]                       ║
-║        Update env vars without rebuilding image                               ║
+║  ENVIRONMENT VARIABLES:                                                       ║
+║  ──────────────────────                                                       ║
+║    Sync-EnvToACA                                                              ║
+║        Quick sync all .env variables to Azure Container App                   ║
+║                                                                               ║
+║    Update-BotEnvironmentVariables [-EnvFile ".env"] [-ExcludeSecrets]         ║
+║        Sync env vars from file to ACA (defaults to .env)                      ║
 ║                                                                               ║
 ║  VERIFICATION FUNCTIONS:                                                      ║
 ║  ───────────────────────                                                      ║

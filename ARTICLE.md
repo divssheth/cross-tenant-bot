@@ -6,7 +6,7 @@ On July 31, 2025, Microsoft deprecated the creation of new multi-tenant bots in 
 
 This deprecation creates a practical challenge for enterprise scenarios where bots need to operate across organizational boundaries. Consider a software vendor providing a Teams bot to customers, or a corporate platform team deploying automation bots across subsidiary tenants. The multi-tenant bot pattern elegantly handled these scenarios. What replaces it?
 
-This article explains how to build a cross-tenant capable Teams bot using UAMI for authentication while leveraging Resource-Specific Consent (RSC) for Graph API access across tenants.
+This article explains how to build a cross-tenant capable Teams bot using UAMI for authentication while leveraging Resource-Specific Consent (RSC) for Graph API access across tenants. The reference implementation also demonstrates integration with **Microsoft Agent Framework** and **Azure AI Foundry** for building intelligent agents with enterprise-grade observability.
 
 ## Understanding the Deprecation
 
@@ -344,6 +344,48 @@ Ensure your multi-tenant app registration is configured for "Accounts in any org
 
 RSC-based channel message access currently requires the Graph API beta endpoint (`graph.microsoft.com/beta`). The v1.0 endpoint does not support RSC for channel messages. If you're getting permission errors with v1.0, switch to the beta endpoint.
 
+## Azure AI Foundry Agent Integration
+
+Beyond the cross-tenant authentication pattern, the reference implementation demonstrates how to integrate intelligent agents using **Microsoft Agent Framework** with Azure AI Foundry.
+
+### Microsoft Agent Framework
+
+The bot connects to Azure AI Foundry using the Microsoft Agent Framework, which provides:
+
+- **Persistent agent registration** - Agents are registered in Foundry and persist across sessions
+- **Foundry-native observability** - Automatic tracing and telemetry via Azure Monitor
+- **Built-in tools** - Web search (Bing grounding) and knowledge base integration (Azure AI Search)
+- **Managed identity support** - UAMI authentication to Foundry endpoints
+
+```python
+from agent_framework import ChatAgent, HostedWebSearchTool
+from agent_framework.azure import AzureOpenAIResponsesClient
+
+class FoundryAgentClient:
+    """Client for Azure AI Foundry agents using Microsoft Agent Framework."""
+    
+    async def chat(self, user_message: str, conversation_id: str) -> str:
+        # Agent processes message with access to web search and knowledge base
+        response = await self._agent.run(user_message, context=conversation_id)
+        return response.content
+```
+
+### Agent Evaluation Framework
+
+The implementation includes a comprehensive evaluation framework that logs results to the Azure AI Foundry Portal:
+
+```bash
+# Run evaluations and view in Foundry Portal
+python -m app.eval.evaluate_agent --log-to-foundry --include-agent-evals
+```
+
+Supported evaluators include:
+- **Quality**: Coherence, Fluency, Relevance, Groundedness
+- **Safety**: Violence detection
+- **Agent-specific**: Tool call accuracy, tool selection, task completion
+
+This enables continuous monitoring and improvement of agent behavior across tenants.
+
 ## Security Considerations
 
 This architecture provides several security benefits:
@@ -366,8 +408,9 @@ The key architectural insights are:
 - A separate multi-tenant app registration handles Graph API authentication across tenants (Tenant A, B, C, etc.)
 - RSC permissions enable per-team authorization without tenant-wide admin consent
 - Azure Key Vault in Tenant A secures the client secret, accessed via UAMI
+- Microsoft Agent Framework enables intelligent agent capabilities with Foundry-native observability
 
-I have published a complete reference implementation including deployment automation and detailed documentation:
+I have published a complete reference implementation including deployment automation, agent integration, evaluation framework, and detailed documentation:
 
 **Repository**: https://github.com/divssheth/cross-tenant-bot
 
