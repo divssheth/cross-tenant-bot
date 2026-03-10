@@ -14,7 +14,8 @@ import logging
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
-from agent_framework import ChatAgent, HostedWebSearchTool, HostedMCPTool
+from agent_framework import ChatAgent, HostedWebSearchTool, MCPStreamableHTTPTool
+from agent_framework._tools import ai_function
 from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential, ManagedIdentityCredential, AzureCliCredential
 from azure.monitor.opentelemetry import configure_azure_monitor
@@ -39,6 +40,109 @@ class AgentResponse:
         return self.status == "completed" and self.error is None
 
 
+# Microsoft acronym database for the decoder tool
+MICROSOFT_ACRONYMS = {
+    # Azure & Cloud
+    "ARM": ("Azure Resource Manager", "The deployment and management service for Azure that provides a management layer to create, update, and delete resources."),
+    "AKS": ("Azure Kubernetes Service", "Managed Kubernetes container orchestration service in Azure."),
+    "ACA": ("Azure Container Apps", "Serverless container platform for running microservices and containerized apps."),
+    "ACR": ("Azure Container Registry", "Private Docker registry service for storing and managing container images."),
+    "AAD": ("Azure Active Directory", "Cloud-based identity and access management service (now Microsoft Entra ID)."),
+    "ASE": ("App Service Environment", "Fully isolated, dedicated environment for running App Service apps at high scale."),
+    "AVD": ("Azure Virtual Desktop", "Desktop and app virtualization service running in the cloud."),
+    "APIM": ("API Management", "Hybrid, multi-cloud management platform for APIs across all environments."),
+    "RBAC": ("Role-Based Access Control", "Authorization system for managing access to Azure resources."),
+    "SAS": ("Shared Access Signature", "URI that grants restricted access rights to Azure Storage resources."),
+    "SKU": ("Stock Keeping Unit", "Defines the pricing tier and capabilities of Azure resources."),
+    "VNET": ("Virtual Network", "Fundamental building block for private networks in Azure."),
+    "NSG": ("Network Security Group", "Contains security rules that allow or deny network traffic."),
+    "PaaS": ("Platform as a Service", "Cloud computing model where provider delivers hardware and software tools."),
+    "IaaS": ("Infrastructure as a Service", "Cloud computing model providing virtualized computing resources."),
+    "SaaS": ("Software as a Service", "Software licensing model where applications are accessed over the internet."),
+    
+    # Microsoft 365 & Productivity
+    "M365": ("Microsoft 365", "Subscription service including Office apps, cloud services, and security."),
+    "O365": ("Office 365", "Legacy name for cloud-based productivity suite (now part of Microsoft 365)."),
+    "SPO": ("SharePoint Online", "Cloud-based collaboration and document management platform."),
+    "EXO": ("Exchange Online", "Cloud-based email and calendaring service."),
+    "ODfB": ("OneDrive for Business", "Enterprise file hosting and synchronization service."),
+    "Teams": ("Microsoft Teams", "Collaboration platform combining chat, video, file storage, and app integration."),
+    "PAM": ("Privileged Access Management", "Security solution for managing elevated access permissions."),
+    "DLP": ("Data Loss Prevention", "Set of tools and processes to prevent data breaches and exfiltration."),
+    
+    # Development & DevOps
+    "ADO": ("Azure DevOps", "Set of development tools for software teams including repos, pipelines, boards."),
+    "CLI": ("Command Line Interface", "Text-based interface for interacting with software and operating systems."),
+    "SDK": ("Software Development Kit", "Collection of tools for developing applications for specific platforms."),
+    "API": ("Application Programming Interface", "Set of protocols for building and integrating application software."),
+    "REST": ("Representational State Transfer", "Architectural style for designing networked applications."),
+    "CI/CD": ("Continuous Integration/Continuous Deployment", "Practice of automating integration and deployment of code changes."),
+    "IaC": ("Infrastructure as Code", "Managing infrastructure through code rather than manual processes."),
+    "VS": ("Visual Studio", "Full-featured IDE for developing applications on Windows, web, cloud."),
+    "VSC": ("Visual Studio Code", "Lightweight, cross-platform source code editor."),
+    
+    # AI & Data
+    "AOAI": ("Azure OpenAI", "Azure service providing access to OpenAI's models including GPT-4."),
+    "AML": ("Azure Machine Learning", "Cloud service for training, deploying, and managing ML models."),
+    "ADF": ("Azure Data Factory", "Cloud-based data integration service for creating data-driven workflows."),
+    "ADB": ("Azure Databricks", "Apache Spark-based analytics platform optimized for Azure."),
+    "RAG": ("Retrieval-Augmented Generation", "AI technique combining retrieval with generation for grounded responses."),
+    "LLM": ("Large Language Model", "AI model trained on vast text data for language understanding and generation."),
+    "GPT": ("Generative Pre-trained Transformer", "Type of large language model architecture from OpenAI."),
+    "NLP": ("Natural Language Processing", "AI field focused on interaction between computers and human language."),
+    
+    # Security & Identity
+    "MFA": ("Multi-Factor Authentication", "Security process requiring multiple forms of verification."),
+    "SSO": ("Single Sign-On", "Authentication scheme allowing access to multiple applications with one login."),
+    "MSAL": ("Microsoft Authentication Library", "Library for authenticating users and acquiring tokens."),
+    "SPN": ("Service Principal Name", "Identity used by services or applications to access Azure resources."),
+    "UAMI": ("User-Assigned Managed Identity", "Azure identity that can be assigned to multiple resources."),
+    "SAMI": ("System-Assigned Managed Identity", "Identity tied to a specific Azure resource's lifecycle."),
+    "PIM": ("Privileged Identity Management", "Service for managing, controlling, and monitoring privileged access."),
+    "CAP": ("Conditional Access Policy", "Policies that control access based on conditions like location or device."),
+    
+    # Copilot & AI Assistants
+    "M365C": ("Microsoft 365 Copilot", "AI assistant integrated into Microsoft 365 apps."),
+    "GHC": ("GitHub Copilot", "AI pair programmer that suggests code in your editor."),
+    "MAF": ("Microsoft Agent Framework", "SDK for building AI agents with tools and multi-agent support."),
+    "MCP": ("Model Context Protocol", "Protocol for providing context to AI models from external sources."),
+}
+
+
+@ai_function
+def decode_microsoft_acronym(acronym: str) -> str:
+    """
+    Decode a Microsoft/Azure/tech acronym and explain what it means.
+    
+    Use this tool when users ask about Microsoft acronyms, abbreviations,
+    or technical terms they don't understand.
+    
+    Args:
+        acronym: The acronym to decode (e.g., "AKS", "RBAC", "M365")
+    
+    Returns:
+        The full name and explanation of the acronym
+    """
+    # Normalize input
+    acronym_upper = acronym.upper().strip()
+    
+    if acronym_upper in MICROSOFT_ACRONYMS:
+        full_name, description = MICROSOFT_ACRONYMS[acronym_upper]
+        return f"**{acronym_upper}** = {full_name}\n\n{description}"
+    
+    # Try partial match
+    partial_matches = [
+        (key, val) for key, val in MICROSOFT_ACRONYMS.items() 
+        if acronym_upper in key or key in acronym_upper
+    ]
+    
+    if partial_matches:
+        results = [f"**{key}** = {val[0]}: {val[1]}" for key, val in partial_matches[:3]]
+        return f"No exact match for '{acronym}'. Did you mean:\n\n" + "\n\n".join(results)
+    
+    return f"I don't have '{acronym}' in my acronym database. Try using web search to find its meaning, or it might not be a standard Microsoft term."
+
+
 # Agent system instructions
 AGENT_INSTRUCTIONS = """You are a Microsoft Expert Assistant - a Teams bot that ONLY answers questions about Microsoft.
 
@@ -58,12 +162,28 @@ OUT OF SCOPE - POLITELY DECLINE:
 HOW TO RESPOND TO OUT-OF-SCOPE QUESTIONS:
 Say: "I'm a Microsoft Expert Assistant and can only help with Microsoft-related questions. Please ask me about Microsoft products, services, Azure, Windows, Office, or other Microsoft topics."
 
+AVAILABLE TOOLS:
+1. **decode_microsoft_acronym**: Instantly decode Microsoft/Azure acronyms (AKS, RBAC, M365, etc.)
+   - Use this FIRST when users ask "what does X stand for?" or mention unknown acronyms
+   - Fast and accurate for common Microsoft terminology
+2. **web_search**: Search the web for current Microsoft news and pricing
+   - Use for latest news, pricing, announcements
+3. **microsoft_docs_search**: Search official Microsoft Learn documentation (via MCP)
+   - Use for how-to guides, tutorials, technical docs, architecture info
+   - PREFERRED for documentation questions - returns trusted official content
+4. **microsoft_docs_fetch**: Fetch full content from a Microsoft Learn page (via MCP)
+   - Use when you have a specific learn.microsoft.com URL to read
+5. **microsoft_code_sample_search**: Find official Microsoft/Azure code samples (via MCP)
+   - Use when users need code examples, can filter by language
+
 CRITICAL RULES:
-1. ALWAYS use web_search to get the latest Microsoft information
-2. Be accurate - use search results, don't guess
-3. If you can't find information, say so clearly
-4. Keep responses concise and helpful
-5. Format responses for Teams (use markdown when helpful)
+1. For acronym questions, use decode_microsoft_acronym first - it's fastest
+2. For documentation/how-to questions, use microsoft_docs_search (MCP) - trusted source
+3. For code examples, use microsoft_code_sample_search with language filter
+4. For news/pricing/announcements, use web_search
+5. Be accurate - use tool results, don't guess
+6. If you can't find information, say so clearly
+7. Format responses for Teams (use markdown when helpful)
 
 You are operating in Microsoft Teams with users from various tenants.
 """
@@ -142,16 +262,41 @@ class FoundryAgentClient:
     
     async def _setup_observability(self):
         """
-        Setup observability with Application Insights.
+        Setup observability for the agent.
         
-        Uses connection string from environment variable.
+        Checks if tracing is already configured via trace_config module.
+        Only configures if not already done.
         """
         if self._observability_configured:
             return
         
         try:
-            conn_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+            # Check if tracing was already configured at app startup
+            from app.trace_config import is_telemetry_enabled
+            if is_telemetry_enabled():
+                self._observability_configured = True
+                logger.info("Using existing telemetry configuration from trace_config")
+                return
             
+            local_debug = os.getenv("LOCAL_DEBUG", "").lower() in ("true", "1", "yes")
+            
+            if local_debug:
+                # Use Agent Framework's built-in tracing for local development
+                # Sends to AI Toolkit (OTLP on port 4317)
+                try:
+                    from agent_framework.observability import configure_otel_providers
+                    configure_otel_providers(
+                        vs_code_extension_port=4317,
+                        enable_sensitive_data=True  # Capture prompts and completions
+                    )
+                    self._observability_configured = True
+                    logger.info("Agent Framework tracing configured (AI Toolkit port 4317)")
+                    return
+                except ImportError:
+                    logger.warning("agent_framework.observability not available")
+            
+            # Production: Use Azure Monitor
+            conn_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
             if conn_string:
                 configure_azure_monitor(
                     connection_string=conn_string,
@@ -174,6 +319,11 @@ class FoundryAgentClient:
         """
         tools = []
         
+        # Add custom local tool for Microsoft acronym decoding
+        # This creates visible spans in traces with inputs/outputs
+        tools.append(decode_microsoft_acronym)
+        logger.info("Added decode_microsoft_acronym tool")
+        
         # Add web search tool for real-time information
         try:
             web_search = HostedWebSearchTool()
@@ -181,6 +331,22 @@ class FoundryAgentClient:
             logger.info("Added web search tool")
         except Exception as e:
             logger.warning(f"Could not add web search tool: {e}")
+        
+        # Add official Microsoft Learn MCP Server for documentation access
+        # This provides: microsoft_docs_search, microsoft_docs_fetch, microsoft_code_sample_search
+        # See: https://github.com/MicrosoftDocs/mcp
+        try:
+            ms_learn_mcp = MCPStreamableHTTPTool(
+                name="microsoft_learn",
+                url="https://learn.microsoft.com/api/mcp",
+                description="Official Microsoft Learn MCP Server - search/fetch Microsoft documentation and code samples",
+                approval_mode="never_require",
+                request_timeout=60,  # Documentation fetches can be slow
+            )
+            tools.append(ms_learn_mcp)
+            logger.info("Added Microsoft Learn MCP tool (microsoft_docs_search, microsoft_docs_fetch, microsoft_code_sample_search)")
+        except Exception as e:
+            logger.warning(f"Could not add Microsoft Learn MCP tool: {e}")
         
         # Add Foundry IQ knowledge base via MCP tool
         # NOTE: MCP knowledge base requires proper Azure AI Foundry project connection setup

@@ -34,7 +34,7 @@ from microsoft_agents.hosting.aiohttp import CloudAdapter
 from microsoft_agents.activity import load_configuration_from_env, ConversationUpdateTypes, ActivityTypes
 
 # Local imports
-from app.trace_config import configure_azure_monitor_telemetry
+from app.trace_config import configure_telemetry
 from app.log_config import configure_logging
 from app.start_server import start_server
 from app.conversation_state import (
@@ -56,9 +56,10 @@ from app.agents import chat_with_agent, get_agent_client
 # Load environment variables from .env file
 load_dotenv()
 
-# Configure Azure Monitor telemetry FIRST (before other initializations)
-# This enables sending traces, logs, and metrics to Application Insights
-configure_azure_monitor_telemetry()
+# Configure telemetry FIRST (before other initializations)
+# - LOCAL_DEBUG=true: Uses Agent Framework tracing with AI Toolkit (port 4317)
+# - Production: Uses Azure Monitor if APPLICATIONINSIGHTS_CONNECTION_STRING is set
+configure_telemetry()
 
 # Configure logging (will automatically send to App Insights if configured above)
 configure_logging()

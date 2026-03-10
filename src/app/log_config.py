@@ -20,14 +20,24 @@ def configure_logging(level: int = logging.INFO, logger_name: str = "cross-tenan
     Returns:
         The configured logger instance.
     """
-    # Configure root logging format
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout)
-        ]
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Always add a console handler to root logger (basicConfig is no-op if handlers exist)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    
+    # Check if stdout handler already exists
+    has_stdout = any(
+        isinstance(h, logging.StreamHandler) and h.stream == sys.stdout 
+        for h in root_logger.handlers
     )
+    
+    if not has_stdout:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(level)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
     
     # Get the application logger
     logger = logging.getLogger(logger_name)

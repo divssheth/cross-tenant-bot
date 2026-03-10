@@ -1,12 +1,15 @@
 """
-Trace configuration for request tracking with Azure Monitor OpenTelemetry.
+Trace configuration for request tracking with OpenTelemetry.
+
+Supports two modes:
+1. Azure Monitor - for production (APPLICATIONINSIGHTS_CONNECTION_STRING)
+2. AI Toolkit - for local development (configure_agent_framework_tracing)
 """
 import os
 import logging
 import contextvars
 from typing import Optional
 
-from azure.monitor.opentelemetry import configure_azure_monitor
 from opentelemetry import trace
 from opentelemetry.trace import Tracer
 
@@ -19,6 +22,53 @@ _tracer: Optional[Tracer] = None
 _initialized: bool = False
 
 logger = logging.getLogger("cross-tenant-bot.trace")
+
+
+def configure_agent_framework_tracing(
+    otlp_port: int = 4317,
+    enable_sensitive_data: bool = True
+) -> bool:
+    """
+    Configure Agent Framework tracing with AI Toolkit integration.
+    
+    Uses the built-in Agent Framework observability which automatically
+    instruments chat clients, agents, and workflow operations.
+    
+    IMPORTANT: Before running, start trace collector via VS Code Command:
+    ai-mlstudio.tracing.open
+    
+    Args:
+        otlp_port: OTLP gRPC port (AI Toolkit default: 4317)
+        enable_sensitive_data: Capture prompts and completions (default: True)
+    
+    Returns:
+        True if successfully configured, False otherwise.
+    """
+    global _tracer, _initialized
+    
+    if _initialized:
+        return True
+    
+    try:
+        from agent_framework.observability import configure_otel_providers
+        
+        configure_otel_providers(
+            vs_code_extension_port=otlp_port,
+            enable_sensitive_data=enable_sensitive_data
+        )
+        
+        _tracer = trace.get_tracer(__name__)
+        _initialized = True
+        
+        logger.info(f"Agent Framework tracing configured (OTLP port: {otlp_port})")
+        return True
+        
+    except ImportError:
+        logger.warning("agent_framework.observability not available - tracing disabled")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to configure Agent Framework tracing: {e}")
+        return False
 
 
 def configure_azure_monitor_telemetry() -> bool:
@@ -43,6 +93,8 @@ def configure_azure_monitor_telemetry() -> bool:
         return False
     
     try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+        
         # Configure Azure Monitor with OpenTelemetry
         # This automatically instruments logging, traces, and metrics
         configure_azure_monitor(
@@ -59,6 +111,27 @@ def configure_azure_monitor_telemetry() -> bool:
     except Exception as e:
         logger.error(f"Failed to configure Azure Monitor: {e}")
         return False
+
+
+def configure_telemetry() -> bool:
+    """
+    Configure telemetry based on environment.
+    
+    - If LOCAL_DEBUG=true and AI Toolkit is available, uses Agent Framework tracing
+    - Otherwise, uses Azure Monitor if APPLICATIONINSIGHTS_CONNECTION_STRING is set
+    
+    Returns:
+        True if any telemetry provider was configured.
+    """
+    local_debug = os.getenv("LOCAL_DEBUG", "").lower() in ("true", "1", "yes")
+    
+    if local_debug:
+        # Try Agent Framework tracing first for local development
+        if configure_agent_framework_tracing():
+            return True
+    
+    # Fall back to Azure Monitor for production
+    return configure_azure_monitor_telemetry()
 
 
 def get_tracer() -> Optional[Tracer]:
