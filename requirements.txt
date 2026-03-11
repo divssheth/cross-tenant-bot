@@ -6,11 +6,11 @@ azure-monitor-opentelemetry>=1.6.0
 opentelemetry-sdk>=1.39.0
 opentelemetry-api>=1.39.0
 
-# Microsoft Agent Framework - for building Foundry agents
+# Microsoft Agent Framework - core + Azure OpenAI client + orchestrations
 azure-ai-agentserver-agentframework>=1.0.0b12
 
-# Azure AI Projects SDK - for Foundry project client and telemetry
-azure-ai-projects>=1.0.0b5
+# Azure AI Projects SDK (new Foundry API - responses API, agent names)
+azure-ai-projects>=2.0.0b3
 
 # Microsoft 365 Agents SDK - Core components
 microsoft-agents-activity>=0.3.0

@@ -313,11 +313,11 @@ class CrossTenantBot:
             # Send the response back to the user
             await context.send_activity(response)
 
-            # Track bot response in conversation state
+            # Track bot response in conversation state (full text for multi-turn context)
             if conversation_id:
                 conversation_manager.add_bot_message(
                     conversation_id=conversation_id,
-                    text=response[:200] + "..." if len(response) > 200 else response
+                    text=response
                 )
 
         except Exception as e:
