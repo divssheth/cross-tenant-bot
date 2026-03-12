@@ -3,8 +3,9 @@
 import logging
 from typing import Optional
 
-from agent_framework import ChatAgent, HandoffBuilder
+from agent_framework import Agent
 from agent_framework.azure import AzureOpenAIResponsesClient
+from agent_framework.orchestrations import HandoffBuilder
 
 from app.agents.triage_agent import create_triage_agent
 from app.agents.web_agent import create_web_agent
@@ -13,7 +14,7 @@ from app.agents.license_agent import create_license_agent
 logger = logging.getLogger("cross-tenant-bot.agents.orchestrator")
 
 
-def create_agents(client: AzureOpenAIResponsesClient, credential) -> tuple[ChatAgent, ChatAgent, Optional[ChatAgent]]:
+def create_agents(client: AzureOpenAIResponsesClient, credential) -> tuple[Agent, Agent, Optional[Agent]]:
     """Create all specialist agent instances.
 
     Args:
@@ -34,7 +35,7 @@ def create_agents(client: AzureOpenAIResponsesClient, credential) -> tuple[ChatA
     return triage, web_agent, license_agent
 
 
-def create_workflow(triage: ChatAgent, web_agent: ChatAgent, license_agent: Optional[ChatAgent] = None):
+def create_workflow(triage: Agent, web_agent: Agent, license_agent: Optional[Agent] = None):
     """Build a HandoffBuilder workflow from pre-created agents.
 
     Creates a new workflow instance (stateful per conversation).
@@ -62,7 +63,7 @@ def create_workflow(triage: ChatAgent, web_agent: ChatAgent, license_agent: Opti
             name="ms-expert-orchestration",
             participants=participants,
         )
-        .set_coordinator(triage)
+        .with_start_agent(triage)
         .add_handoff(triage, triage_targets)
         .add_handoff(web_agent, [triage])
     )
@@ -70,11 +71,7 @@ def create_workflow(triage: ChatAgent, web_agent: ChatAgent, license_agent: Opti
     if license_agent:
         builder = builder.add_handoff(license_agent, [triage])
 
-    workflow = (
-        builder
-        .with_interaction_mode("autonomous", autonomous_turn_limit=1)
-        .build()
-    )
+    workflow = builder.build()
 
     logger.info(f"HandoffBuilder workflow created (license_agent: {'enabled' if license_agent else 'disabled'})")
     return workflow

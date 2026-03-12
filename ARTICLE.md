@@ -1,4 +1,4 @@
-# Building Cross-Tenant Microsoft Teams Bots After the Multi-Tenant Bot Deprecation
+# Building Cross-Tenant Multi-Agent Teams Bots After the Multi-Tenant Bot Deprecation
 
 ## Introduction
 
@@ -6,7 +6,11 @@ On July 31, 2025, Microsoft deprecated the creation of new multi-tenant bots in 
 
 This deprecation creates a practical challenge for enterprise scenarios where bots need to operate across organizational boundaries. Consider a software vendor providing a Teams bot to customers, or a corporate platform team deploying automation bots across subsidiary tenants. The multi-tenant bot pattern elegantly handled these scenarios. What replaces it?
 
-This article explains how to build a cross-tenant capable Teams bot using UAMI for authentication while leveraging Resource-Specific Consent (RSC) for Graph API access across tenants. The reference implementation also demonstrates integration with **Microsoft Agent Framework** and **Azure AI Foundry** for building intelligent agents with enterprise-grade observability.
+This article covers two interrelated concerns:
+
+1. **Cross-tenant authentication** — How to build a Teams bot using UAMI for Bot Framework authentication and Resource-Specific Consent (RSC) for Graph API access across tenants, with no secrets in code and no tenant-wide admin consent.
+
+2. **Multi-agent orchestration** — How to use **Microsoft Agent Framework** with **Azure AI Foundry** to route user questions to specialist agents via a HandoffBuilder workflow, with enterprise-grade observability and evaluation.
 
 ## Understanding the Deprecation
 
@@ -344,47 +348,147 @@ Ensure your multi-tenant app registration is configured for "Accounts in any org
 
 RSC-based channel message access currently requires the Graph API beta endpoint (`graph.microsoft.com/beta`). The v1.0 endpoint does not support RSC for channel messages. If you're getting permission errors with v1.0, switch to the beta endpoint.
 
-## Azure AI Foundry Agent Integration
+## Multi-Agent Orchestration with Microsoft Agent Framework
 
-Beyond the cross-tenant authentication pattern, the reference implementation demonstrates how to integrate intelligent agents using **Microsoft Agent Framework** with Azure AI Foundry.
+Beyond the cross-tenant authentication pattern, the reference implementation demonstrates how to build a **multi-agent system** using Microsoft Agent Framework and Azure AI Foundry.
 
-### Microsoft Agent Framework
+### Why Multiple Agents?
 
-The bot connects to Azure AI Foundry using the Microsoft Agent Framework, which provides:
+A single agent handling all user questions quickly runs into limitations: bloated system prompts, conflicting tool sets, and difficulty evaluating specific capabilities. By decomposing into specialist agents, each agent has focused instructions, appropriate tools, and can be evaluated independently.
 
-- **Persistent agent registration** - Agents are registered in Foundry and persist across sessions
-- **Foundry-native observability** - Automatic tracing and telemetry via Azure Monitor
-- **Built-in tools** - Web search (Bing grounding) and knowledge base integration (Azure AI Search)
-- **Managed identity support** - UAMI authentication to Foundry endpoints
+### Architecture: HandoffBuilder Workflow
+
+The bot uses Agent Framework's `HandoffBuilder` to create a workflow where a triage agent routes questions to specialists:
+
+```
+User Message → Triage Agent → [routing decision]
+                                  │
+                   ┌──────────────┼──────────────┐
+                   ▼              ▼               ▼
+              Web Agent    License Agent    Direct Response
+              (search,     (Foundry         (greetings,
+               MCP,         deployed,        non-Microsoft)
+               acronyms)    knowledge
+                            base)
+```
+
+The triage agent analyzes user intent and calls a handoff function (`handoff_to_web_agent` or `handoff_to_license_agent`). The Agent Framework routes execution to the target agent. If a specialist determines it received a misrouted question, it can hand back to triage for re-routing.
+
+### Agent Definitions
+
+**Triage Agent** — Created from `AzureOpenAIResponsesClient.as_agent()` with routing instructions. No tools; its only job is intent classification and a handoff call.
+
+**Web Agent** — Created from `AzureOpenAIResponsesClient.as_agent()` with multiple tools:
+- `AzureOpenAIResponsesClient.get_web_search_tool()` — Bing-grounded web search for current information
+- `MCPStreamableHTTPTool` — Microsoft Learn MCP server (`https://learn.microsoft.com/api/mcp`) for documentation search, page fetching, and code sample search
+- `decode_microsoft_acronym` — Local `@ai_function` tool for instant acronym decoding (AKS, RBAC, M365, etc.)
+
+**License Agent** — Created from `AzureAIAgentClient` which connects to a deployed Foundry agent. The deployed agent has its own instructions, tools, and knowledge base (Azure AI Search index). No local configuration needed beyond the agent name and project endpoint.
+
+### Building the Workflow
 
 ```python
-from agent_framework import ChatAgent, HostedWebSearchTool
-from agent_framework.azure import AzureOpenAIResponsesClient
+from agent_framework.orchestrations import HandoffBuilder
 
-class FoundryAgentClient:
-    """Client for Azure AI Foundry agents using Microsoft Agent Framework."""
-    
-    async def chat(self, user_message: str, conversation_id: str) -> str:
-        # Agent processes message with access to web search and knowledge base
-        response = await self._agent.run(user_message, context=conversation_id)
-        return response.content
+# Each agent is an Agent instance (either local or Foundry-backed)
+triage = create_triage_agent(client)
+web_agent = create_web_agent(client)
+license_agent = create_license_agent(client, credential)  # may be None
+
+workflow = (
+    HandoffBuilder(
+        name="ms-expert-orchestration",
+        participants=[triage, web_agent, license_agent],
+    )
+    .with_start_agent(triage)
+    .add_handoff(triage, [web_agent, license_agent])
+    .add_handoff(web_agent, [triage])
+    .add_handoff(license_agent, [triage])
+    .build()
+)
 ```
 
-### Agent Evaluation Framework
+The license agent is optional. If `AZURE_AI_LICENSE_AGENT_ID` is not set, the workflow runs with triage + web agent only. This allows gradual adoption.
 
-The implementation includes a comprehensive evaluation framework that logs results to the Azure AI Foundry Portal:
+### MCP Tool Integration
+
+The web agent uses Microsoft Learn's public MCP server for trusted documentation access:
+
+```python
+from agent_framework import MCPStreamableHTTPTool
+
+ms_learn_mcp = MCPStreamableHTTPTool(
+    name="microsoft_learn",
+    url="https://learn.microsoft.com/api/mcp",
+    description="Official Microsoft Learn MCP Server",
+    approval_mode="never_require",
+    request_timeout=60,
+)
+```
+
+This gives the agent access to three tools from a single MCP endpoint:
+- `microsoft_docs_search` — Search official documentation
+- `microsoft_docs_fetch` — Fetch full page content
+- `microsoft_code_sample_search` — Find code samples with language filtering
+
+### Connecting to Foundry-Deployed Agents
+
+The license agent demonstrates how to use `AzureAIAgentClient` to connect to an agent that's already deployed in Azure AI Foundry:
+
+```python
+from agent_framework import Agent
+from agent_framework.azure import AzureAIAgentClient
+
+azure_ai_agent_client = AzureAIAgentClient(
+    agent_name="unified-knowledge-agent-1",
+    credential=async_credential,
+    project_endpoint=os.getenv("AZURE_AI_PROJECT_ENDPOINT"),
+    model_deployment_name=os.getenv("AZURE_AI_MODEL", "gpt-4.1"),
+)
+
+license_agent = Agent(
+    azure_ai_agent_client,
+    instructions="If misrouted, call handoff_to_triage.",
+    name="license_agent",
+    description="Handles Microsoft 365 licensing questions",
+)
+```
+
+The deployed agent's own instructions, tools, and knowledge base are used directly — no local wrapper needed.
+
+### Observability: Dual-Mode Tracing
+
+The bot supports two telemetry modes through a single `configure_telemetry()` function:
+
+| Mode | When | Exporter |
+|------|------|----------|
+| **AI Toolkit** | `LOCAL_DEBUG=true` | `configure_otel_providers(vs_code_extension_port=4317)` |
+| **Azure Monitor** | Production | `configure_azure_monitor(connection_string=...)` |
+
+Both modes auto-instrument Agent Framework operations — LLM calls, tool invocations, and workflow handoffs appear as nested spans in the trace viewer.
+
+For production, structured logging with `extra={}` fields becomes searchable `customDimensions` in Application Insights:
+
+```python
+logger.info("Agent response", extra={
+    "conversation_id": conv_id,
+    "agent_name": "web_agent",
+    "response_time_ms": 1200,
+})
+```
+
+### Agent Evaluation
+
+The evaluation framework tests agent quality using Azure AI Foundry's built-in evaluators, supporting both single-turn and multi-turn conversations:
 
 ```bash
-# Run evaluations and view in Foundry Portal
-python -m app.eval.evaluate_agent --log-to-foundry --include-agent-evals
+cd src
+python -m app.eval.multi_agent_eval --log-to-foundry --include-agent-evals
 ```
 
-Supported evaluators include:
-- **Quality**: Coherence, Fluency, Relevance, Groundedness
-- **Safety**: Violence detection
-- **Agent-specific**: Tool call accuracy, tool selection, task completion
+**Quality evaluators** (coherence, fluency, relevance, groundedness) measure response quality. **Safety evaluators** (violence, sexual, self-harm, hate) catch harmful content. **Agent evaluators** (tool call accuracy, tool selection, task completion) measure how well agents use their tools.
 
-This enables continuous monitoring and improvement of agent behavior across tenants.
+Results are viewable in the Foundry Portal with per-evaluator scores, trends over time, and drill-down into individual responses.
 
 ## Security Considerations
 
@@ -398,19 +502,25 @@ This architecture provides several security benefits:
 
 4. **Credential rotation**: Rotating the client secret requires only updating Key Vault in Tenant A. No application redeployment needed.
 
+5. **DefaultAzureCredential**: The agent framework uses `DefaultAzureCredential` for Azure OpenAI and Foundry access, inheriting the UAMI identity in production — no additional secrets needed.
+
 ## Conclusion
 
 Microsoft's deprecation of multi-tenant bot creation does not prevent building bots that work across organizational boundaries. By combining UAMI for bot authentication with a separate multi-tenant app registration for Graph API access, you can build cross-tenant capable bots that follow Microsoft's current guidance.
 
+Adding multi-agent orchestration via Microsoft Agent Framework transforms a simple cross-tenant bot into an intelligent assistant with specialist capabilities, tool-augmented reasoning, and enterprise-grade observability.
+
 The key architectural insights are:
 
 - UAMI authenticates your bot to Bot Framework in Tenant A; it does not restrict which tenants can message your bot
-- A separate multi-tenant app registration handles Graph API authentication across tenants (Tenant A, B, C, etc.)
+- A separate multi-tenant app registration handles Graph API authentication across tenants
 - RSC permissions enable per-team authorization without tenant-wide admin consent
-- Azure Key Vault in Tenant A secures the client secret, accessed via UAMI
-- Microsoft Agent Framework enables intelligent agent capabilities with Foundry-native observability
+- Azure Key Vault secures the client secret, accessed via UAMI
+- HandoffBuilder composes multiple specialist agents into a single workflow with automatic routing
+- Agent evaluations via Foundry SDK enable continuous quality monitoring across both single-turn and multi-turn conversations
+- Dual-mode observability (AI Toolkit locally, Azure Monitor in production) provides tracing throughout development and deployment
 
-I have published a complete reference implementation including deployment automation, agent integration, evaluation framework, and detailed documentation:
+The complete reference implementation includes deployment automation, multi-agent orchestration, evaluation framework, and detailed documentation:
 
 **Repository**: https://github.com/divssheth/cross-tenant-bot
 

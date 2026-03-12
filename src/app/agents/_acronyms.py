@@ -1,6 +1,6 @@
 """Microsoft acronym database and decoder tool."""
 
-from agent_framework._tools import ai_function
+from agent_framework import tool as ai_function
 
 
 # Microsoft acronym database for the decoder tool

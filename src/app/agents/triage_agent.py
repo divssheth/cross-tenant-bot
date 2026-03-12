@@ -1,6 +1,6 @@
 """Triage agent that routes requests to specialist agents."""
 
-from agent_framework import ChatAgent
+from agent_framework import Agent
 from agent_framework.azure import AzureOpenAIResponsesClient
 
 
@@ -38,9 +38,9 @@ IMPORTANT:
 """
 
 
-def create_triage_agent(client: AzureOpenAIResponsesClient) -> ChatAgent:
+def create_triage_agent(client: AzureOpenAIResponsesClient) -> Agent:
     """Create the triage agent that routes to specialists."""
-    return client.create_agent(
+    return client.as_agent(
         name="triage",
         instructions=TRIAGE_INSTRUCTIONS,
         description="Routes Microsoft questions to the appropriate specialist agent",

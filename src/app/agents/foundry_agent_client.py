@@ -11,7 +11,7 @@ import logging
 from typing import Optional, Any
 from dataclasses import dataclass
 
-from agent_framework import AgentRunResponseUpdate, ChatMessage
+from agent_framework import AgentResponseUpdate, Message
 from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential, ManagedIdentityCredential, AzureCliCredential
 from azure.monitor.opentelemetry import configure_azure_monitor
@@ -191,10 +191,10 @@ class FoundryAgentClient:
         user_name: Optional[str],
         additional_context: Optional[str],
     ) -> list:
-        """Build a ChatMessage list from conversation history for multi-turn context.
+        """Build a Message list from conversation history for multi-turn context.
 
         Retrieves prior turns from ConversationStateManager and converts them
-        to ChatMessage objects (user -> role="user", bot -> role="assistant").
+        to Message objects (user -> role="user", bot -> role="assistant").
         The current user message (with optional enrichment) is appended last.
 
         This gives the triage agent full conversational context while still
@@ -202,7 +202,7 @@ class FoundryAgentClient:
         """
         from app.conversation_state import conversation_manager
 
-        messages: list[ChatMessage] = []
+        messages: list[Message] = []
 
         if conversation_id:
             conversation = conversation_manager.get_conversation(conversation_id)
@@ -213,7 +213,7 @@ class FoundryAgentClient:
                 prior = stored[:-1] if stored else []
                 for msg in prior:
                     role = "assistant" if msg.is_from_bot else "user"
-                    messages.append(ChatMessage(role=role, text=msg.text))
+                    messages.append(Message(role=role, text=msg.text))
 
         # Build current message with optional enrichment
         current_text = message
@@ -222,9 +222,9 @@ class FoundryAgentClient:
         if additional_context:
             current_text = f"{current_text}\n\n[Context: {additional_context}]"
 
-        messages.append(ChatMessage(role="user", text=current_text))
+        messages.append(Message(role="user", text=current_text))
 
-        logger.debug(f"Built {len(messages)} ChatMessages ({len(messages) - 1} history + 1 current)")
+        logger.debug(f"Built {len(messages)} Messages ({len(messages) - 1} history + 1 current)")
         return messages
 
     async def chat(
@@ -265,7 +265,7 @@ class FoundryAgentClient:
             # Get tracer for custom spans
             tracer = trace.get_tracer(__name__)
 
-            # Build conversation history as ChatMessage list for multi-turn context
+            # Build conversation history as Message list for multi-turn context
             chat_messages = self._build_chat_messages(
                 message, conversation_id, user_name, additional_context
             )
@@ -297,7 +297,7 @@ class FoundryAgentClient:
                 # First: check WorkflowOutputEvent outputs (specialist responses via handoff)
                 outputs = result.get_outputs()
                 for output in outputs:
-                    if isinstance(output, AgentRunResponseUpdate) and output.text:
+                    if isinstance(output, AgentResponseUpdate) and output.text:
                         response_text += str(output.text)
 
                 # Fallback: if coordinator responded directly (no handoff), its response

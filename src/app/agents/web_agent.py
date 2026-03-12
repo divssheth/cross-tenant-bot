@@ -3,7 +3,7 @@
 import os
 import logging
 
-from agent_framework import ChatAgent, HostedWebSearchTool, MCPStreamableHTTPTool
+from agent_framework import Agent, MCPStreamableHTTPTool
 from agent_framework.azure import AzureOpenAIResponsesClient
 
 from app.agents._acronyms import decode_microsoft_acronym
@@ -58,7 +58,7 @@ def _build_tools() -> list:
     logger.info("Added decode_microsoft_acronym tool")
 
     try:
-        web_search = HostedWebSearchTool()
+        web_search = AzureOpenAIResponsesClient.get_web_search_tool()
         tools.append(web_search)
         logger.info("Added web search tool")
     except Exception as e:
@@ -80,10 +80,10 @@ def _build_tools() -> list:
     return tools
 
 
-def create_web_agent(client: AzureOpenAIResponsesClient) -> ChatAgent:
+def create_web_agent(client: AzureOpenAIResponsesClient) -> Agent:
     """Create the web agent with search and documentation tools."""
     tools = _build_tools()
-    return client.create_agent(
+    return client.as_agent(
         name="web_agent",
         instructions=WEB_AGENT_INSTRUCTIONS,
         tools=tools if tools else None,

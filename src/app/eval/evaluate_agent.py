@@ -1839,6 +1839,8 @@ def main():
                         help="Include agent-specific evaluators (tool selection, tool accuracy, task completion, etc.)")
     parser.add_argument("--single-turn-only", action="store_true", help="Run only single-turn evaluations")
     parser.add_argument("--multi-turn-only", action="store_true", help="Run only multi-turn conversation evaluations")
+    parser.add_argument("--multi-agent", action="store_true",
+                        help="Run multi-agent evaluation with routing introspection (uses multi_agent_eval module)")
     parser.add_argument("--log-to-foundry", action="store_true", 
                         help="Log evaluation results to Foundry Portal (requires AZURE_AI_PROJECT_ENDPOINT)")
     parser.add_argument("--evaluation-name", type=str, default=None,
@@ -1846,6 +1848,12 @@ def main():
     parser.add_argument("--test-data", type=str, default=None, 
                         help="Path to custom test data JSON file (default: test_data.json)")
     args = parser.parse_args()
+    
+    # Dispatch to multi-agent evaluator if requested
+    if args.multi_agent:
+        from app.eval.multi_agent_eval import main as multi_agent_main
+        multi_agent_main()
+        return
     
     print("\n🔍 Microsoft Expert Assistant - Agent Evaluation")
     print("=" * 70)

@@ -1,90 +1,118 @@
-# Cross-Tenant Teams Bot with UAMI and RSC
+# Cross-Tenant Multi-Agent Teams Bot
 
-A Microsoft Teams bot that uses **User-Assigned Managed Identity (UAMI)** for secure authentication and **Resource-Specific Consent (RSC)** for reading channel messages—without requiring user sign-in or tenant-wide admin consent.
+A Microsoft Teams bot combining **cross-tenant authentication** (UAMI + RSC) with **multi-agent orchestration** (Microsoft Agent Framework + Azure AI Foundry). The bot operates securely across organizational boundaries while routing user questions to specialized AI agents.
 
-## Why This Architecture?
+## Two Pillars
 
-### The Problem with Traditional Multi-Tenant Bots
+| Pillar | What It Solves |
+|--------|---------------|
+| **Cross-Tenant Auth** | Secure bot-to-tenant communication using UAMI for Bot Framework and RSC for Graph API — no secrets in code, no admin consent |
+| **Multi-Agent Orchestration** | HandoffBuilder workflow routes questions through a triage agent to specialist agents (web search, licensing) with automatic tool use |
 
-Traditional multi-tenant bots use a **multi-tenant app registration with a client secret** for Bot Framework authentication. This creates several challenges:
+---
 
-| Challenge | Description |
-|-----------|-------------|
-| **Secret Management** | Client secrets must be stored, rotated, and secured |
-| **Tenant-Wide Consent** | Graph API permissions require admin consent in every tenant |
-| **Security Risk** | Leaked secrets can compromise all tenant installations |
-| **Operational Overhead** | Secret rotation requires coordinated deployments |
-
-### The UAMI + RSC Solution
-
-This architecture separates concerns and eliminates secrets:
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Your Tenant (Home)                            │
-│                                                                      │
-│  ┌──────────────┐     ┌──────────────┐     ┌───────────────────┐    │
-│  │     UAMI     │────►│  Key Vault   │     │ Multi-Tenant App  │    │
-│  │  (Bot Auth)  │     │  (Secrets)   │     │  (Graph API/RSC)  │    │
-│  └──────┬───────┘     └──────┬───────┘     └─────────┬─────────┘    │
-│         │                    │                       │               │
-│         │                    └───────────────────────┤               │
-│         ▼                                            ▼               │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                    Your Bot (Container)                      │    │
-│  │  • Uses UAMI for Bot Framework (no secrets in code)          │    │
-│  │  • Retrieves Graph secret from Key Vault via UAMI            │    │
-│  │  • Calls Graph API with tenant-specific tokens               │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-└──────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Your Tenant (Home)                                                     │
+│                                                                         │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐                      │
+│  │   UAMI   │─►│Key Vault │  │Multi-Tenant App  │                      │
+│  │(Bot Auth)│  │(Secrets) │  │ (Graph API/RSC)  │                      │
+│  └────┬─────┘  └────┬─────┘  └────────┬─────────┘                      │
+│       │              └─────────────────┤                                │
+│       ▼                                ▼                                │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │                     Teams Bot Container                          │   │
+│  │                                                                  │   │
+│  │   User Message                                                   │   │
+│  │       │                                                          │   │
+│  │       ▼                                                          │   │
+│  │   ┌─────────┐    ┌───────────┐    ┌───────────────┐             │   │
+│  │   │ Triage  │───►│ Web Agent │    │ License Agent  │             │   │
+│  │   │ (router)│    │ (search,  │    │ (Foundry       │             │   │
+│  │   │         │───►│  MCP,     │    │  deployed,     │             │   │
+│  │   │         │    │  acronyms)│    │  knowledge     │             │   │
+│  │   └─────────┘    └───────────┘    │  base)         │             │   │
+│  │       HandoffBuilder Workflow     └───────────────┘             │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
                               │
-                              │ Bot Framework (handles cross-tenant routing)
+                              │ Bot Framework (cross-tenant routing)
                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      External Tenant (Customer)                      │
-│                                                                      │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │  Team with App Installed                                     │    │
-│  │  ├─ RSC permissions granted at install (no admin consent)   │    │
-│  │  ├─ Bot reads channel messages via Graph API                 │    │
-│  │  └─ Per-team scoping (not tenant-wide access)               │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-└──────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  External Tenant (Customer)                                             │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  Team with App Installed                                         │   │
+│  │  ├─ RSC permissions granted at install (no admin consent)       │   │
+│  │  ├─ Bot reads channel messages via Graph API                     │   │
+│  │  └─ Per-team scoping (not tenant-wide access)                   │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Multi-Agent Orchestration
+
+The bot uses [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) with a **HandoffBuilder** workflow to route user questions to specialist agents.
+
+### Agents
+
+| Agent | Role | Tools |
+|-------|------|-------|
+| **Triage** | Router — analyzes intent and hands off to specialists | None (routing only) |
+| **Web Agent** | General Microsoft questions | Web search (Bing), Microsoft Learn MCP, acronym decoder |
+| **License Agent** | Microsoft 365 licensing questions | Foundry-deployed agent with knowledge base |
+
+### How It Works
+
+```python
+from agent_framework.orchestrations import HandoffBuilder
+
+# Agents are created from AzureOpenAIResponsesClient or AzureAIAgentClient
+workflow = (
+    HandoffBuilder(name="ms-expert-orchestration", participants=[triage, web_agent, license_agent])
+    .with_start_agent(triage)
+    .add_handoff(triage, [web_agent, license_agent])
+    .add_handoff(web_agent, [triage])
+    .add_handoff(license_agent, [triage])
+    .build()
+)
+
+# Each user message goes through the workflow
+result = await workflow.run(user_message)
+```
+
+- **Triage** receives every message, decides which specialist should handle it
+- Specialists can hand back to triage if a question was misrouted
+- The license agent is optional — if `AZURE_AI_LICENSE_AGENT_ID` is not set, the workflow runs with triage + web agent only
+
+For deep-dive architecture details, see [docs/MULTI_AGENT_ORCHESTRATION.md](docs/MULTI_AGENT_ORCHESTRATION.md).
+
+---
+
+## Cross-Tenant Authentication
+
+### Why UAMI + RSC?
+
+Microsoft [deprecated multi-tenant bot creation](https://learn.microsoft.com/en-us/azure/bot-service/bot-service-quickstart-registration) after July 31, 2025. This architecture uses:
+
+- **UAMI** for Bot Framework authentication (no secrets in code)
+- **Multi-tenant app registration** solely for Graph API access (secret in Key Vault)
+- **RSC** for per-team permissions (no tenant-wide admin consent)
 
 ### Key Benefits
 
 | Benefit | Description |
 |---------|-------------|
-| **No Secrets in Code** | UAMI authenticates to Bot Framework and Key Vault without credentials |
-| **Per-Team Permissions** | RSC grants access only to teams where the app is installed |
-| **No Admin Consent** | Team owners can install the app and grant RSC permissions |
-| **Secure Secret Storage** | Graph API secret stored in Key Vault, accessed via UAMI |
-| **Cross-Tenant Ready** | Works in any tenant where the Teams app is installed |
+| **No Secrets in Code** | UAMI authenticates to Bot Framework and Key Vault |
+| **Per-Team Permissions** | RSC grants access only to installed teams |
+| **No Admin Consent** | Team owners control app installation |
+| **Cross-Tenant Ready** | Works in any tenant where the app is installed |
 
----
-
-## Architecture Components
-
-### 1. User-Assigned Managed Identity (UAMI)
-- Authenticates the bot to Azure Bot Framework
-- Accesses Key Vault to retrieve the Graph API client secret
-- No secrets stored in environment variables or code
-
-### 2. Multi-Tenant App Registration
-- Used for Microsoft Graph API authentication
-- Configured with RSC permissions in the Teams manifest
-- Client secret stored in Key Vault (not in the app)
-
-### 3. Azure Key Vault
-- Securely stores the Graph API client secret
-- UAMI has "Key Vault Secrets User" role
-- Secret retrieved at runtime, never stored locally
-
-### 4. Resource-Specific Consent (RSC)
-- Permissions declared in the Teams app manifest
-- Granted when a team owner installs the app
-- Scoped to the specific team (not tenant-wide)
+For the full authentication deep-dive, see [ARTICLE.md](ARTICLE.md).
 
 ---
 
@@ -94,7 +122,7 @@ This architecture separates concerns and eliminates secrets:
 
 - Azure subscription with permissions to create resources
 - Microsoft 365 tenant with Teams
-- Python 3.10+
+- Python 3.11+
 - Azure CLI installed
 
 ### 1. Clone and Install
@@ -175,6 +203,11 @@ MICROSOFT_APP_TYPE=SingleTenant
 GRAPH_APP_ID=<your-multi-tenant-app-client-id>
 KEY_VAULT_NAME=bot-keyvault
 GRAPH_CLIENT_SECRET_NAME=graph-client-secret
+
+# Agent Framework
+AZURE_AI_ENDPOINT=<your-azure-openai-endpoint>
+AZURE_AI_MODEL=gpt-4o
+LOCAL_DEBUG=true
 ```
 
 ### 7. Update Teams Manifest
@@ -202,7 +235,14 @@ Ensure your `manifest.json` has:
 
 **Important:** `webApplicationInfo.id` must match `GRAPH_APP_ID`.
 
-### 8. Deploy and Install
+### 8. Run Locally
+
+```bash
+cd src
+python -m app
+```
+
+### 9. Deploy and Install
 
 1. Deploy to Azure Container Apps (or your preferred host)
 2. Assign the UAMI to the Container App
@@ -211,99 +251,35 @@ Ensure your `manifest.json` has:
 
 ---
 
-## Deployment Script
+## Deployment
 
 The `scripts/deploy-bot.ps1` script automates deployment to Azure Container Apps.
 
-### Prerequisites
-
-- Azure CLI installed and logged in (`az login`)
-- PowerShell 5.1+ or PowerShell Core
-- Existing UAMI and Azure Bot resource (see Quick Start steps 1-5)
-
 ### Configuration
 
-Before running, edit the configuration variables at the top of the script:
+Edit the variables at the top of the script:
 
 ```powershell
-$script:RESOURCE_GROUP = "your-bot-rg"           # Your Azure resource group
-$script:LOCATION = "eastus"                       # Azure region
-$script:ACR_NAME = "yourbotacr"                  # Container registry name (globally unique)
-$script:CONTAINER_ENV_NAME = "your-bot-env"      # Container Apps environment name
-$script:CONTAINER_APP_NAME = "your-bot-app"      # Container App name
-$script:UAMI_NAME = "your-bot-uami"              # Your UAMI name
-$script:BOT_APP_ID = "your-graph-app-id"         # Multi-tenant app ID (GRAPH_APP_ID)
+$script:RESOURCE_GROUP = "your-bot-rg"
+$script:LOCATION = "eastus"
+$script:ACR_NAME = "yourbotacr"
+$script:CONTAINER_ENV_NAME = "your-bot-env"
+$script:CONTAINER_APP_NAME = "your-bot-app"
+$script:UAMI_NAME = "your-bot-uami"
+$script:BOT_APP_ID = "your-graph-app-id"
 ```
 
-### Usage
+### Commands
 
 ```powershell
-# Load the script
 cd scripts
 . .\deploy-bot.ps1
 
-# Show available commands
-Show-Help
-```
-
-### Available Commands
-
-| Command | Description |
-|---------|-------------|
-| `Deploy-BotInfrastructure` | Full deployment: creates ACR, Container Apps Environment, and Container App |
-| `Redeploy-BotCode` | Rebuilds image and updates Container App (use for code changes) |
-| `Update-BotEnvironmentVariables` | Updates env vars without rebuilding |
-| `Verify-BotDeployment` | Checks all configurations and displays details |
-| `Get-BotEndpoint` | Gets the bot's messaging endpoint URL |
-| `Get-BotLogs` | Views Container App logs |
-
-### Common Workflows
-
-#### Initial Deployment
-
-```powershell
-. .\deploy-bot.ps1
-Deploy-BotInfrastructure -ImageTag "v1"
-```
-
-This will:
-1. Create Azure Container Registry
-2. Build and push the Docker image
-3. Create Container Apps Environment
-4. Assign AcrPull role to UAMI
-5. Create Container App with UAMI and environment variables
-
-#### Deploying Code Changes
-
-```powershell
-. .\deploy-bot.ps1
-Redeploy-BotCode -ImageTag "v2"
-
-# Or use auto-generated timestamp tag
-Redeploy-BotCode
-```
-
-#### Updating Environment Variables
-
-```powershell
-. .\deploy-bot.ps1
-Update-BotEnvironmentVariables -EnvFile ".env.prod"
-```
-
-#### Troubleshooting
-
-```powershell
-# Verify all configurations
-Verify-BotDeployment
-
-# View logs
-Get-BotLogs -Tail 100
-
-# Stream logs in real-time
-Get-BotLogs -Follow
-
-# Get endpoint URL (copies to clipboard)
-Get-BotEndpoint
+Deploy-BotInfrastructure -ImageTag "v1"  # Full initial deployment
+Redeploy-BotCode -ImageTag "v2"          # Code changes only
+Update-BotEnvironmentVariables            # Env vars only
+Verify-BotDeployment                      # Health check
+Get-BotLogs -Tail 100                     # View logs
 ```
 
 ---
@@ -313,89 +289,100 @@ Get-BotEndpoint
 ```
 ├── src/
 │   └── app/
-│       ├── __init__.py
-│       ├── __main__.py           # Bot entry point and message handlers
-│       ├── agents/               # AI agent clients
-│       │   └── foundry_agent_client.py
-│       ├── eval/                 # Agent evaluation framework
-│       │   ├── evaluate_agent.py
-│       │   └── test_data.json
-│       ├── conversation_state.py  # In-memory conversation tracking + team mapping cache
-│       ├── graph_rsc_client.py    # Graph API client with RSC support
-│       ├── log_config.py          # Logging configuration
-│       ├── start_server.py        # aiohttp server startup
-│       └── trace_config.py        # Telemetry configuration
+│       ├── __main__.py              # Bot entry point and message handlers
+│       ├── start_server.py          # aiohttp server startup
+│       ├── conversation_state.py    # In-memory conversation tracking + team mapping
+│       ├── graph_rsc_client.py      # Graph API client with RSC support
+│       ├── log_config.py            # Logging configuration
+│       ├── trace_config.py          # Dual-mode telemetry (AI Toolkit / Azure Monitor)
+│       ├── agents/
+│       │   ├── orchestrator.py      # HandoffBuilder workflow creation
+│       │   ├── triage_agent.py      # Router agent (intent classification)
+│       │   ├── web_agent.py         # Web search + MCP + acronym tools
+│       │   ├── license_agent.py     # Foundry-deployed licensing agent
+│       │   ├── foundry_agent_client.py  # Legacy single-agent client
+│       │   └── _acronyms.py         # Microsoft acronym dictionary
+│       └── eval/
+│           ├── multi_agent_eval.py  # Multi-agent evaluation runner
+│           ├── evaluate_agent.py    # Single-agent evaluation runner
+│           └── test_data.json       # Evaluation test cases
 ├── packages/
-│   ├── teams/                     # Teams bot manifest
-│   │   ├── manifest.json
-│   │   ├── color.png
-│   │   └── outline.png
-│   └── copilot/                   # M365 Copilot agent manifest
-│       ├── manifest.template.json
-│       ├── color.png
-│       └── outline.png
+│   ├── teams/                       # Teams bot manifest
+│   └── copilot/                     # M365 Copilot agent manifest
 ├── scripts/
-│   ├── deploy-bot.ps1             # Deployment automation script
-│   └── Create-AppPackages.ps1     # Creates Teams & Copilot app packages
-├── docs/                          # Documentation
-├── tests/                         # Unit tests (future)
-├── Dockerfile                     # Container image definition
-├── requirements.txt               # Python dependencies
-├── env.TEMPLATE                   # Environment variable template
-└── README.md                      # This file
+│   ├── deploy-bot.ps1               # Deployment automation
+│   └── Create-AppPackages.ps1       # Teams & Copilot package builder
+├── docs/
+│   ├── MULTI_AGENT_ORCHESTRATION.md # Agent architecture deep-dive
+│   ├── EVALUATION_GUIDE.md          # Evaluation setup and custom evaluators
+│   └── OBSERVABILITY.md             # Tracing, logging, KQL, dashboards
+├── Dockerfile
+├── requirements.txt
+├── env.TEMPLATE
+├── ARTICLE.md                       # In-depth architecture article
+└── README.md
 ```
 
 ---
 
 ## Creating App Packages
 
-### Using the Script
-
-The `scripts/Create-AppPackages.ps1` script creates both Teams Bot and Copilot Agent packages:
-
 ```powershell
 cd scripts
 
-# Create both packages
-.\Create-AppPackages.ps1
-
-# Create Teams Bot package only
-.\Create-AppPackages.ps1 -TeamsOnly
-
-# Create Copilot Agent package only
-.\Create-AppPackages.ps1 -CopilotOnly
+.\Create-AppPackages.ps1              # Create both packages
+.\Create-AppPackages.ps1 -TeamsOnly   # Teams Bot only
+.\Create-AppPackages.ps1 -CopilotOnly # Copilot Agent only
 ```
-
-### Output Files
 
 | Package | Location | Description |
 |---------|----------|-------------|
 | Teams Bot | `packages/teams/CrossTenantBot.zip` | Standard Teams bot for 1:1, group, and channel chats |
 | Copilot Agent | `packages/copilot/CrossTenantAgent.zip` | Custom Engine Agent for Microsoft 365 Copilot |
 
-### Teams Bot vs Copilot Agent
+---
 
-| Feature | Teams Bot | Copilot Agent |
-|---------|-----------|---------------|
-| Manifest Version | 1.16 | 1.22 |
-| Scopes | personal, team, groupChat | personal, team, groupChat, **copilot** |
-| Works in | Teams chats and channels | Microsoft 365 Copilot |
-| Authentication | Bot Service routing | Requires app consent |
-| Multi-tenant | Works via Bot Service | **Requires multi-tenant app registration** |
-| RSC Support | Yes | No (RSC removed for Copilot compatibility) |
+## Running Evaluations
 
-### Copilot Agent Requirements
+The project includes a multi-agent evaluation framework that logs results to Azure AI Foundry.
 
-⚠️ **Important:** To use the Copilot Agent in external tenants:
+```bash
+cd src
 
-1. **Make your app registration multi-tenant:**
-   - Azure Portal → App Registration → Authentication
-   - Change to: "Accounts in any organizational directory (Any Microsoft Entra ID tenant)"
-   - Save
+# Run all evaluations and log to Foundry Portal
+python -m app.eval.multi_agent_eval --log-to-foundry
 
-2. **Users need Microsoft 365 Copilot license**
+# Include agent-specific evaluators (tool usage quality)
+python -m app.eval.multi_agent_eval --log-to-foundry --include-agent-evals
 
-3. **App must be approved/installed in their tenant**
+# Single-turn only / multi-turn only
+python -m app.eval.multi_agent_eval --log-to-foundry --single-turn-only
+python -m app.eval.multi_agent_eval --log-to-foundry --multi-turn-only
+
+# Filter by category
+python -m app.eval.multi_agent_eval --log-to-foundry --category licensing
+```
+
+**Evaluators:** Coherence, Fluency, Relevance, Groundedness, Violence detection, Tool Call Accuracy, Tool Selection, Task Completion, and more.
+
+Results are viewable in **Foundry Portal → Your Project → Evaluations**.
+
+For detailed evaluation setup, see [docs/EVALUATION_GUIDE.md](docs/EVALUATION_GUIDE.md).
+
+---
+
+## Observability
+
+The bot supports dual-mode telemetry:
+
+| Mode | When | View Results |
+|------|------|-------------|
+| **AI Toolkit** | `LOCAL_DEBUG=true` | VS Code AI Toolkit trace viewer |
+| **Azure Monitor** | `APPLICATIONINSIGHTS_CONNECTION_STRING` set | Azure Portal → App Insights |
+
+Both modes auto-instrument Agent Framework operations (LLM calls, tool invocations, workflow handoffs).
+
+For KQL queries, alerts, dashboards, and best practices, see [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
 
 ---
 
@@ -409,21 +396,19 @@ cd scripts
 | `/context` | Show recent conversation context (uses RSC for channels) |
 | `/contextinfo` | Show conversation state details |
 | `/rsctest` | Diagnose RSC permissions (use in a channel) |
-| `/teamcache` | Show team mapping cache status (aadGroupId lookup) |
+| `/teamcache` | Show team mapping cache status |
+
+Any other message is routed through the multi-agent workflow.
 
 ---
 
 ## RSC Troubleshooting
 
-### Verify RSC Permissions are Granted
-
-Use Graph Explorer to check:
+### Verify RSC Permissions
 
 ```
 GET https://graph.microsoft.com/beta/teams/{team-id}/permissionGrants
 ```
-
-Expected response includes entries with your app's `clientAppId`.
 
 ### Common Issues
 
@@ -432,37 +417,24 @@ Expected response includes entries with your app's `clientAppId`.
 | `consentedPermissionSet: null` | RSC not consented | Uninstall and reinstall the app |
 | 403 with `Group.Selected` | Azure AD permissions conflict | Remove all Graph permissions from Azure AD app |
 | External app ID mismatch | Manifest not updated | Republish app with correct `webApplicationInfo.id` |
-| Token acquisition fails | Wrong tenant ID | Ensure you're using the target tenant's ID |
-| 403 with "resource not found" | Wrong team_id format | Use M365 Group ID (GUID), not the channel-style `19:xxx` format |
+| Token acquisition fails | Wrong tenant ID | Use the target tenant's ID |
+| 403 with "resource not found" | Wrong team_id format | Use M365 Group ID (GUID), not `19:xxx` format |
 
-### Extracting the Correct Team ID for Graph API
+### Extracting the Correct Team ID
 
-The Graph API requires the **M365 Group ID** (a GUID) as the `team_id` parameter, not the channel-style `19:xxx@thread.tacv2` format.
+The Graph API requires the **M365 Group ID** (a GUID), not the channel-style `19:xxx@thread.tacv2`:
 
-The `conversation.id` in channel activities contains the Group ID in this format:
-```
-19:abc123@thread.tacv2;groupId=12345678-1234-1234-1234-123456789abc;tenantId=...
-```
-
-Extract the `groupId` value using regex:
 ```python
 import re
 
 def extract_team_channel_ids(activity) -> tuple:
     conv_id = activity.conversation.id or ''
-    
-    # Extract M365 Group ID (required for Graph API)
     group_match = re.search(r'groupId=([a-f0-9-]+)', conv_id, re.IGNORECASE)
     team_id = group_match.group(1) if group_match else None
-    
-    # Extract channel ID (the 19:xxx part)
     channel_match = re.search(r'(19:[^;]+)', conv_id)
     channel_id = channel_match.group(1) if channel_match else None
-    
     return team_id, channel_id
 ```
-
-**Note:** The `channel_data.team.id` field may return the channel-style ID (`19:xxx`), which will cause 403 errors when used with Graph API. Always extract `groupId` from `conversation.id` for reliable results.
 
 ### Azure AD App Permissions
 
@@ -471,11 +443,9 @@ For RSC to work, your Azure AD app should have **minimal or no** API permissions
 ✅ **Good:** Empty or just `User.Read` (delegated)  
 ❌ **Bad:** `Team.ReadBasic.All`, `Group.Read.All`, `ChannelMessage.Read.All`
 
-RSC permissions are declared in the Teams manifest and granted at app install time—not in Azure AD.
-
 ---
 
-## Environment Variables Reference
+## Environment Variables
 
 ### Core Bot Authentication
 
@@ -486,7 +456,7 @@ RSC permissions are declared in the Teams manifest and granted at app install ti
 | `AZURE_TENANT_ID` | Yes | Your home tenant ID |
 | `MicrosoftAppType` | Yes | Set to `UserAssignedMsi` for UAMI bots |
 | `PORT` | No | Server port (default: `3978`) |
-| `LOCAL_DEBUG` | No | Set to `true` for local development with AzureCliCredential |
+| `LOCAL_DEBUG` | No | Set to `true` for local development |
 
 ### Microsoft Graph API (RSC)
 
@@ -498,28 +468,22 @@ RSC permissions are declared in the Teams manifest and granted at app install ti
 | `GRAPH_CLIENT_SECRET_NAME` | No | Secret name in Key Vault (default: `graph-client-secret`) |
 | `ENABLE_RSC` | No | Enable RSC features (default: `false`) |
 
-### Azure AI Foundry (Agent Framework)
+### Multi-Agent Framework
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `AZURE_AI_ENDPOINT` | Yes | Azure OpenAI endpoint (e.g., `https://your-resource.openai.azure.com/`) |
+| `AZURE_AI_ENDPOINT` | Yes | Azure OpenAI endpoint |
 | `AZURE_AI_MODEL` | Yes | Model deployment name (e.g., `gpt-4o`) |
-| `AZURE_AI_AGENT_NAME` | No | Agent name (default: `teams-bot-agent`) |
-| `AZURE_AI_MAX_TOKENS` | No | Max tokens for responses (default: `1000`) |
-| `AZURE_AI_PROJECT_ENDPOINT` | No | Foundry project endpoint for evaluations (format: `https://<account>.services.ai.azure.com/api/projects/<project>`) |
-
-### Azure AI Search (Knowledge Base)
-
-| Variable | Required | Description |
-|----------|----------|-------------|
+| `AZURE_AI_LICENSE_AGENT_ID` | No | Foundry agent name for license agent (omit to disable) |
+| `AZURE_AI_PROJECT_ENDPOINT` | No | Foundry project endpoint for evaluations |
 | `AZURE_SEARCH_ENDPOINT` | No | Azure AI Search endpoint for knowledge base |
 | `AZURE_SEARCH_INDEX_NAME` | No | Index name in Azure AI Search |
 
-### Telemetry (Application Insights)
+### Telemetry
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `APPLICATIONINSIGHTS_CONNECTION_STRING` | No | Connection string from Application Insights for telemetry |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | No | App Insights connection string for production telemetry |
 
 ### Conversation Settings
 
@@ -530,142 +494,31 @@ RSC permissions are declared in the Teams manifest and granted at app install ti
 
 ---
 
-## Azure AI Foundry Agent Integration
-
-This bot uses **Microsoft Agent Framework** to connect to Azure AI Foundry, providing:
-
-- **Persistent agent registration** in Foundry
-- **Foundry-native observability** with automatic tracing
-- **Web search tool** for real-time information (Bing grounding)
-- **Knowledge base integration** via Azure AI Search
-
-### Agent Configuration
-
-The agent is configured in [src/app/agents/foundry_agent_client.py](src/app/agents/foundry_agent_client.py):
-
-```python
-from agent_framework import ChatAgent, HostedWebSearchTool, HostedMCPTool
-from agent_framework.azure import AzureOpenAIResponsesClient
-
-# Agent is configured via environment variables
-# AZURE_AI_ENDPOINT, AZURE_AI_MODEL, AZURE_AI_AGENT_NAME
-```
-
-### Local Development
-
-For local development, set `LOCAL_DEBUG=true` to use your Azure CLI credentials:
-
-```bash
-# Login to Azure CLI (use the correct tenant)
-az login --tenant YOUR_TENANT_ID
-
-# Set local debug mode
-echo "LOCAL_DEBUG=true" >> .env
-```
-
----
-
-## Running Agent Evaluations
-
-The project includes a comprehensive evaluation framework in [src/app/eval/](src/app/eval/):
-
-### Quick Start
-
-```bash
-cd src/app/eval
-
-# Run all evaluations locally
-python evaluate_agent.py
-
-# Run evaluations and log to Foundry Portal
-python evaluate_agent.py --log-to-foundry
-
-# Include agent-specific evaluators
-python evaluate_agent.py --log-to-foundry --include-agent-evals
-```
-
-### Evaluation Types
-
-| Type | Description |
-|------|-------------|
-| Single-turn | Individual question/answer pairs |
-| Multi-turn | Conversational sequences |
-
-### Built-in Evaluators
-
-**Quality Evaluators:**
-- Coherence, Fluency, Relevance, Groundedness
-
-**Safety Evaluators:**
-- Violence detection
-
-**Agent Evaluators** (with `--include-agent-evals`):
-- Tool Call Accuracy, Tool Call Success, Tool Input Accuracy
-- Tool Output Utilization, Tool Selection, Task Completion
-
-### CLI Options
-
-```bash
-python evaluate_agent.py --help
-
-Options:
-  --log-to-foundry       Log results to Foundry Portal
-  --include-agent-evals  Include agent-specific evaluators
-  --single-turn-only     Run only single-turn evaluations
-  --multi-turn-only      Run only multi-turn evaluations
-  --category CATEGORY    Filter by test category
-  --evaluation-name NAME Custom evaluation name
-```
-
-See [test_data.json](src/app/eval/test_data.json) for evaluation test cases.
-
----
-
-## Telemetry & Observability
-
-The bot includes comprehensive observability with Azure Monitor and Application Insights.
-
-### Configuration
-
-Telemetry is automatically enabled when `APPLICATIONINSIGHTS_CONNECTION_STRING` is set:
-
-```python
-# src/app/trace_config.py
-from azure.monitor.opentelemetry import configure_azure_monitor
-
-configure_azure_monitor(
-    connection_string=os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"),
-    enable_live_metrics=True,
-)
-```
-
-### Features
-
-- **Distributed tracing** - Track requests across bot and agent
-- **Structured logging** - Contextual logs with conversation IDs
-- **Custom metrics** - Track agent response times, tool usage
-- **Live metrics** - Real-time performance monitoring
-
-### Documentation
-
-For detailed guidance, see:
-- [Observability Best Practices](docs/OBSERVABILITY_BEST_PRACTICES.md) - Comprehensive guide
-- [Observability Cheatsheet](docs/OBSERVABILITY_CHEATSHEET.md) - Quick reference
-
----
-
 ## Security Considerations
 
-1. **No secrets in code or config files** - All secrets in Key Vault
-2. **UAMI for authentication** - No credentials to rotate or leak
-3. **Per-team permissions** - RSC scopes access to installed teams only
-4. **Minimal Azure AD permissions** - Only what's needed for the app to function
+1. **No secrets in code or config** — Client secret stored in Key Vault, accessed via UAMI
+2. **UAMI for authentication** — No credentials to rotate or leak
+3. **Per-team permissions** — RSC scopes access to installed teams only
+4. **Minimal Azure AD permissions** — Only what's needed for the app to function
+5. **DefaultAzureCredential** — Automatic credential selection for local and production
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [ARTICLE.md](ARTICLE.md) | In-depth architecture article covering cross-tenant auth and multi-agent design |
+| [docs/MULTI_AGENT_ORCHESTRATION.md](docs/MULTI_AGENT_ORCHESTRATION.md) | HandoffBuilder workflow, agent definitions, tool integration |
+| [docs/EVALUATION_GUIDE.md](docs/EVALUATION_GUIDE.md) | Evaluation setup, custom evaluators, Foundry SDK integration |
+| [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | Tracing, logging, KQL queries, alerts, dashboards |
+| [src/app/README.md](src/app/README.md) | Module-level architecture and code reference |
 
 ---
 
 ## License
 
-MIT License - See LICENSE file for details.
+MIT License
 
 ---
 
@@ -680,7 +533,7 @@ MIT License - See LICENSE file for details.
 
 ## Support
 
-For issues and questions:
-- Check the [Troubleshooting](#rsc-troubleshooting) section
-- Open a GitHub issue
-- Review Microsoft's [RSC documentation](https://learn.microsoft.com/en-us/microsoftteams/platform/graph-api/rsc/resource-specific-consent)
+- Check the [RSC Troubleshooting](#rsc-troubleshooting) section
+- Open a [GitHub issue](https://github.com/divssheth/cross-tenant-bot/issues)
+- [Microsoft RSC documentation](https://learn.microsoft.com/en-us/microsoftteams/platform/graph-api/rsc/resource-specific-consent)
+- [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)
