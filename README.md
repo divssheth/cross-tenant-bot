@@ -115,7 +115,7 @@ Microsoft [deprecated multi-tenant bot creation](https://learn.microsoft.com/en-
 | **No Admin Consent** | Team owners control app installation |
 | **Cross-Tenant Ready** | Works in any tenant where the app is installed |
 
-For the full authentication deep-dive, see [ARTICLE.md](ARTICLE.md).
+For the full architecture walkthrough — multi-agent orchestration, observability, evaluation, and cross-tenant auth — see [ARTICLE.md](ARTICLE.md).
 
 ---
 
@@ -304,7 +304,7 @@ Get-BotLogs -Tail 100                     # View logs
 │       │   ├── triage_agent.py      # Router agent (intent classification)
 │       │   ├── web_agent.py         # Web search + MCP + acronym tools
 │       │   ├── license_agent.py     # Foundry-deployed licensing agent
-│       │   ├── foundry_agent_client.py  # Legacy single-agent client
+│       │   ├── foundry_agent_client.py  # Multi-agent orchestration client
 │       │   └── _acronyms.py         # Microsoft acronym dictionary
 │       └── eval/
 │           ├── multi_agent_eval.py  # Multi-agent evaluation runner
@@ -316,6 +316,7 @@ Get-BotLogs -Tail 100                     # View logs
 ├── scripts/
 │   ├── deploy-bot.ps1               # Deployment automation
 │   ├── workbook-template.json       # Azure Monitor Workbook (ARM template)
+│   ├── workbook-gallery.json        # Workbook JSON for portal import
 │   └── Create-AppPackages.ps1       # Teams & Copilot package builder
 ├── docs/
 │   ├── MULTI_AGENT_ORCHESTRATION.md # Agent architecture deep-dive
@@ -517,7 +518,7 @@ For RSC to work, your Azure AD app should have **minimal or no** API permissions
 
 | Document | Description |
 |----------|-------------|
-| [ARTICLE.md](ARTICLE.md) | In-depth architecture article covering cross-tenant auth and multi-agent design |
+| [ARTICLE.md](ARTICLE.md) | In-depth architecture article covering multi-agent orchestration, observability, evaluation, and cross-tenant auth |
 | [docs/MULTI_AGENT_ORCHESTRATION.md](docs/MULTI_AGENT_ORCHESTRATION.md) | HandoffBuilder workflow, agent definitions, tool integration |
 | [docs/EVALUATION_GUIDE.md](docs/EVALUATION_GUIDE.md) | Evaluation setup, custom evaluators, Foundry SDK integration |
 | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | Tracing, logging, KQL queries, alerts, dashboards |
