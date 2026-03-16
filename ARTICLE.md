@@ -399,14 +399,15 @@ workflow = (
     HandoffBuilder(
         name="ms-expert-orchestration",
         participants=[triage, web_agent, license_agent],
+        termination_condition=_max_handoffs_termination(6),  # Safety net
     )
     .with_start_agent(triage)
-    .add_handoff(triage, [web_agent, license_agent])
-    .add_handoff(web_agent, [triage])
-    .add_handoff(license_agent, [triage])
+    .add_handoff(triage, [web_agent, license_agent])  # One-way routing
     .build()
 )
 ```
+
+Routing is **one-way** (triage → specialists only). Specialists answer to the best of their ability or politely decline off-topic questions — they never hand back to triage. A `_max_handoffs_termination(6)` safety net prevents loops.
 
 The license agent is optional. If `AZURE_AI_LICENSE_AGENT_ID` is not set, the workflow runs with triage + web agent only. This allows gradual adoption.
 
@@ -448,7 +449,7 @@ azure_ai_agent_client = AzureAIAgentClient(
 
 license_agent = Agent(
     azure_ai_agent_client,
-    instructions="If misrouted, call handoff_to_triage.",
+    instructions="Answer licensing questions using your knowledge base. If the question is not about licensing, answer to the best of your ability.",
     name="license_agent",
     description="Handles Microsoft 365 licensing questions",
 )
@@ -456,16 +457,16 @@ license_agent = Agent(
 
 The deployed agent's own instructions, tools, and knowledge base are used directly — no local wrapper needed.
 
-### Observability: Dual-Mode Tracing
+### Observability: Built-in Agent Framework Tracing
 
-The bot supports two telemetry modes through a single `configure_telemetry()` function:
+The bot uses [Agent Framework's built-in observability](https://learn.microsoft.com/en-us/agent-framework/agents/observability?pivots=programming-language-python) through a single `configure_telemetry()` function:
 
-| Mode | When | Exporter |
-|------|------|----------|
-| **AI Toolkit** | `LOCAL_DEBUG=true` | `configure_otel_providers(vs_code_extension_port=4317)` |
-| **Azure Monitor** | Production | `configure_azure_monitor(connection_string=...)` |
+| Mode | When | Setup |
+|------|------|-------|
+| **AI Toolkit** | `LOCAL_TRACING=true` | `configure_otel_providers(vs_code_extension_port=4317)` |
+| **Azure Monitor** | Production | `configure_azure_monitor()` + `enable_instrumentation()` ([Pattern #3](https://learn.microsoft.com/en-us/agent-framework/agents/observability?pivots=programming-language-python#3-third-party-setup)) |
 
-Both modes auto-instrument Agent Framework operations — LLM calls, tool invocations, and workflow handoffs appear as nested spans in the trace viewer.
+Agent Framework auto-instruments all operations — `invoke_agent <name>`, `chat <model>`, and `execute_tool <function>` spans appear as nested spans with token usage metrics. No extra instrumentation code needed.
 
 For production, structured logging with `extra={}` fields becomes searchable `customDimensions` in Application Insights:
 

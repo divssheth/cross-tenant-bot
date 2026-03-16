@@ -14,8 +14,7 @@ from dataclasses import dataclass
 from agent_framework import AgentResponseUpdate, Message
 from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential, ManagedIdentityCredential, AzureCliCredential
-from azure.monitor.opentelemetry import configure_azure_monitor
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import SpanKind, StatusCode
 from opentelemetry import trace
 
 from app.agents.orchestrator import create_agents, create_workflow
@@ -80,9 +79,6 @@ class FoundryAgentClient:
         self._license_agent = None
         self._client: Optional[AzureOpenAIResponsesClient] = None
 
-        # Observability state
-        self._observability_configured = False
-
     @property
     def is_configured(self) -> bool:
         """Check if the client is properly configured."""
@@ -106,60 +102,10 @@ class FoundryAgentClient:
         else:
             return DefaultAzureCredential()
 
-    async def _setup_observability(self):
-        """
-        Setup observability for the agent.
-
-        Checks if tracing is already configured via trace_config module.
-        Only configures if not already done.
-        """
-        if self._observability_configured:
-            return
-
-        try:
-            # Check if tracing was already configured at app startup
-            from app.trace_config import is_telemetry_enabled
-            if is_telemetry_enabled():
-                self._observability_configured = True
-                logger.info("Using existing telemetry configuration from trace_config")
-                return
-
-            local_debug = os.getenv("LOCAL_DEBUG", "").lower() in ("true", "1", "yes")
-
-            if local_debug:
-                try:
-                    from agent_framework.observability import configure_otel_providers
-                    configure_otel_providers(
-                        vs_code_extension_port=4317,
-                        enable_sensitive_data=True
-                    )
-                    self._observability_configured = True
-                    logger.info("Agent Framework tracing configured (AI Toolkit port 4317)")
-                    return
-                except ImportError:
-                    logger.warning("agent_framework.observability not available")
-
-            # Production: Use Azure Monitor
-            conn_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
-            if conn_string:
-                configure_azure_monitor(
-                    connection_string=conn_string,
-                    enable_live_metrics=True,
-                )
-                self._observability_configured = True
-                logger.info("Azure Monitor observability configured")
-            else:
-                logger.warning("APPLICATIONINSIGHTS_CONNECTION_STRING not set - telemetry disabled")
-
-        except Exception as e:
-            logger.error(f"Error setting up observability: {e}")
-
     async def _ensure_agents_created(self):
         """Create all agents once (lazy init). Agents are reused across workflows."""
         if self._agents_created:
             return
-
-        await self._setup_observability()
 
         credential = self._get_credential()
         self._client = AzureOpenAIResponsesClient(
@@ -291,6 +237,45 @@ class FoundryAgentClient:
 
                 result = await workflow.run(chat_messages)
 
+                # ── Extract agent routing from workflow events ──
+                # NOTE: executor_invoked/executor_completed events fire for ALL
+                # executors on every turn (including silent broadcast syncs), so
+                # they are NOT reliable for tracking which agents were actively
+                # called. Instead, derive routing purely from handoff_sent events.
+                handoff_chain = []  # ordered list of (source, target)
+                responding_agent = None
+
+                for event in result:
+                    etype = getattr(event, 'type', None)
+                    if etype == "handoff_sent":
+                        data = getattr(event, 'data', None)
+                        if data:
+                            source = getattr(data, 'source', '?')
+                            target = getattr(data, 'target', '?')
+                            handoff_chain.append((source, target))
+                            span.add_event("handoff", {"from": source, "to": target})
+                    elif etype == "output":
+                        eid = getattr(event, 'executor_id', None)
+                        if eid:
+                            responding_agent = eid
+
+                # Build a clean route from handoff chain
+                if handoff_chain:
+                    # e.g. triage → web_agent
+                    route_parts = [handoff_chain[0][0]]  # start with first source
+                    for _, target in handoff_chain:
+                        route_parts.append(target)
+                    route_label = " → ".join(route_parts)
+                    span.set_attribute("agent.route", route_label)
+                    span.set_attribute("agent.handoff_count", len(handoff_chain))
+                else:
+                    route_label = "direct"
+
+                if responding_agent:
+                    span.set_attribute("agent.responding", responding_agent)
+
+                span.update_name(f"Agent Chat [{route_label}]")
+
                 # Extract output from workflow result
                 response_text = ""
 
@@ -326,6 +311,13 @@ class FoundryAgentClient:
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error in Foundry agent chat: {e}", exc_info=True)
+
+            # Record the error on the active span so it's immediately visible
+            # in the App Insights waterfall without drilling into child spans
+            current_span = trace.get_current_span()
+            if current_span and current_span.is_recording():
+                current_span.set_status(StatusCode.ERROR, error_msg)
+                current_span.record_exception(e)
 
             return AgentResponse(
                 content="I'm sorry, I encountered an unexpected error. Please try again later.",

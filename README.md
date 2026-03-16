@@ -73,11 +73,13 @@ from agent_framework.orchestrations import HandoffBuilder
 
 # Agents are created from AzureOpenAIResponsesClient or AzureAIAgentClient
 workflow = (
-    HandoffBuilder(name="ms-expert-orchestration", participants=[triage, web_agent, license_agent])
+    HandoffBuilder(
+        name="ms-expert-orchestration",
+        participants=[triage, web_agent, license_agent],
+        termination_condition=_max_handoffs_termination(6),  # Safety net
+    )
     .with_start_agent(triage)
-    .add_handoff(triage, [web_agent, license_agent])
-    .add_handoff(web_agent, [triage])
-    .add_handoff(license_agent, [triage])
+    .add_handoff(triage, [web_agent, license_agent])  # One-way routing
     .build()
 )
 
@@ -86,7 +88,8 @@ result = await workflow.run(user_message)
 ```
 
 - **Triage** receives every message, decides which specialist should handle it
-- Specialists can hand back to triage if a question was misrouted
+- Routing is **one-way** (triage → specialists only) — specialists answer to the best of their ability or politely decline off-topic questions
+- A `_max_handoffs_termination(6)` safety net prevents infinite loops
 - The license agent is optional — if `AZURE_AI_LICENSE_AGENT_ID` is not set, the workflow runs with triage + web agent only
 
 For deep-dive architecture details, see [docs/MULTI_AGENT_ORCHESTRATION.md](docs/MULTI_AGENT_ORCHESTRATION.md).
@@ -208,6 +211,7 @@ GRAPH_CLIENT_SECRET_NAME=graph-client-secret
 AZURE_AI_ENDPOINT=<your-azure-openai-endpoint>
 AZURE_AI_MODEL=gpt-4o
 LOCAL_DEBUG=true
+LOCAL_TRACING=true
 ```
 
 ### 7. Update Teams Manifest
@@ -311,11 +315,13 @@ Get-BotLogs -Tail 100                     # View logs
 │   └── copilot/                     # M365 Copilot agent manifest
 ├── scripts/
 │   ├── deploy-bot.ps1               # Deployment automation
+│   ├── workbook-template.json       # Azure Monitor Workbook (ARM template)
 │   └── Create-AppPackages.ps1       # Teams & Copilot package builder
 ├── docs/
 │   ├── MULTI_AGENT_ORCHESTRATION.md # Agent architecture deep-dive
 │   ├── EVALUATION_GUIDE.md          # Evaluation setup and custom evaluators
-│   └── OBSERVABILITY.md             # Tracing, logging, KQL, dashboards
+│   ├── OBSERVABILITY.md             # Tracing, logging, KQL, dashboards
+│   └── KQL_CHEATSHEET.md            # Copy-paste KQL queries for App Insights
 ├── Dockerfile
 ├── requirements.txt
 ├── env.TEMPLATE
@@ -373,16 +379,18 @@ For detailed evaluation setup, see [docs/EVALUATION_GUIDE.md](docs/EVALUATION_GU
 
 ## Observability
 
-The bot supports dual-mode telemetry:
+The bot uses [Agent Framework's built-in observability](https://learn.microsoft.com/en-us/agent-framework/agents/observability?pivots=programming-language-python) which auto-instruments agents, chat clients, and tool executions.
 
 | Mode | When | View Results |
 |------|------|-------------|
-| **AI Toolkit** | `LOCAL_DEBUG=true` | VS Code AI Toolkit trace viewer |
+| **AI Toolkit** | `LOCAL_TRACING=true` | VS Code AI Toolkit trace viewer |
 | **Azure Monitor** | `APPLICATIONINSIGHTS_CONNECTION_STRING` set | Azure Portal → App Insights |
 
-Both modes auto-instrument Agent Framework operations (LLM calls, tool invocations, workflow handoffs).
+`LOCAL_TRACING` controls tracing destination; `LOCAL_DEBUG` controls authentication only.
 
-For KQL queries, alerts, dashboards, and best practices, see [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
+Agent Framework auto-creates `invoke_agent`, `chat`, and `execute_tool` spans plus token usage metrics. Production uses `configure_azure_monitor()` + `enable_instrumentation()` ([Pattern #3](https://learn.microsoft.com/en-us/agent-framework/agents/observability?pivots=programming-language-python#3-third-party-setup)).
+
+For KQL queries, see [docs/KQL_CHEATSHEET.md](docs/KQL_CHEATSHEET.md). For alerts, dashboards, and best practices, see [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
 
 ---
 
@@ -456,7 +464,8 @@ For RSC to work, your Azure AD app should have **minimal or no** API permissions
 | `AZURE_TENANT_ID` | Yes | Your home tenant ID |
 | `MicrosoftAppType` | Yes | Set to `UserAssignedMsi` for UAMI bots |
 | `PORT` | No | Server port (default: `3978`) |
-| `LOCAL_DEBUG` | No | Set to `true` for local development |
+| `LOCAL_DEBUG` | No | Set to `true` to skip UAMI auth (agentsplayground/emulator) |
+| `LOCAL_TRACING` | No | Set to `true` to send traces to AI Toolkit instead of App Insights |
 
 ### Microsoft Graph API (RSC)
 

@@ -74,7 +74,7 @@ def create_license_agent(
 
     return Agent(
         azure_ai_agent_client,
-        instructions="If this question was misrouted and is NOT about licensing, call handoff_to_triage to re-route.",
+        instructions="Answer licensing questions using your knowledge base. If the question is not about licensing, answer to the best of your ability.",
         name="license_agent",
         description="Handles Microsoft 365 licensing, subscription, and entitlement questions using a specialized knowledge base",
     )

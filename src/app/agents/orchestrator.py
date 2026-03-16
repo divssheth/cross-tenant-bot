@@ -35,12 +35,26 @@ def create_agents(client: AzureOpenAIResponsesClient, credential) -> tuple[Agent
     return triage, web_agent, license_agent
 
 
+def _max_handoffs_termination(max_handoffs: int):
+    """Return a termination condition that stops after *max_handoffs* routing steps."""
+    counter = {"n": 0}
+
+    def _check(messages) -> bool:
+        counter["n"] += 1
+        if counter["n"] > max_handoffs:
+            logger.warning("Handoff limit (%d) reached — terminating workflow", max_handoffs)
+            return True
+        return False
+
+    return _check
+
+
 def create_workflow(triage: Agent, web_agent: Agent, license_agent: Optional[Agent] = None):
     """Build a HandoffBuilder workflow from pre-created agents.
 
     Creates a new workflow instance (stateful per conversation).
     The triage agent is the entry point and routes to specialists.
-    Specialists can hand back to triage if misrouted.
+    Routing is one-way: triage → specialist. Specialists do not hand back.
     If license_agent is None, the workflow runs with triage + web_agent only.
 
     Args:
@@ -62,14 +76,11 @@ def create_workflow(triage: Agent, web_agent: Agent, license_agent: Optional[Age
         HandoffBuilder(
             name="ms-expert-orchestration",
             participants=participants,
+            termination_condition=_max_handoffs_termination(6),
         )
         .with_start_agent(triage)
         .add_handoff(triage, triage_targets)
-        .add_handoff(web_agent, [triage])
     )
-
-    if license_agent:
-        builder = builder.add_handoff(license_agent, [triage])
 
     workflow = builder.build()
 

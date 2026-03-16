@@ -126,7 +126,7 @@ def create_triage_agent(client: AzureOpenAIResponsesClient) -> Agent:
 | **File** | `src/app/agents/web_agent.py` |
 | **Client** | `AzureOpenAIResponsesClient.as_agent()` |
 | **Name** | `web_agent` |
-| **Handoff targets** | `triage` (for misrouted questions) |
+| **Handoff targets** | None (one-way routing from triage only) |
 | **Tools** | `decode_microsoft_acronym`, `web_search`, Microsoft Learn MCP (3 tools) |
 
 **Tool details**:
@@ -152,7 +152,7 @@ def create_web_agent(client: AzureOpenAIResponsesClient) -> Agent:
 | **File** | `src/app/agents/license_agent.py` |
 | **Client** | `Agent(AzureAIAgentClient(...))` |
 | **Name** | `license_agent` |
-| **Handoff targets** | `triage` (for misrouted questions) |
+| **Handoff targets** | None (one-way routing from triage only) |
 | **Tools** | Deployed Foundry agent's own tools + knowledge base |
 
 The license agent connects to a **pre-deployed Foundry agent** by name. The deployed agent has its own instructions, tools (Azure AI Search knowledge base), and model. No local tools or wrapper needed.
@@ -167,7 +167,7 @@ azure_ai_agent_client = AzureAIAgentClient(
 
 return Agent(
     azure_ai_agent_client,
-    instructions="If this question was misrouted and is NOT about licensing, call handoff_to_triage to re-route.",
+    instructions="Answer licensing questions using your knowledge base. If the question is not about licensing, answer to the best of your ability.",
     name="license_agent",
     description="Handles Microsoft 365 licensing, subscription, and entitlement questions using a specialized knowledge base",
 )
@@ -194,17 +194,18 @@ def create_workflow(triage, web_agent, license_agent=None):
         HandoffBuilder(
             name="ms-expert-orchestration",
             participants=participants,
+            termination_condition=_max_handoffs_termination(6),  # Safety net
         )
         .with_start_agent(triage)              # Entry point
-        .add_handoff(triage, triage_targets)    # triage → specialists
-        .add_handoff(web_agent, [triage])       # web_agent → triage (misroute)
+        .add_handoff(triage, triage_targets)    # triage → specialists (one-way)
     )
-
-    if license_agent:
-        builder = builder.add_handoff(license_agent, [triage])  # license → triage
 
     return builder.build()
 ```
+
+**One-way routing:** Specialists do not hand back to triage. If an agent receives a misrouted question, it answers to the best of its ability or politely declines. This prevents handoff loops that can occur with bidirectional routing.
+
+**Termination safety net:** `_max_handoffs_termination(6)` stops the workflow after 6 handoff steps to prevent infinite loops.
 
 ### API Breakdown
 
@@ -213,7 +214,20 @@ def create_workflow(triage, web_agent, license_agent=None):
 | `HandoffBuilder(name, participants)` | Creates a named workflow with a list of all participating agents |
 | `.with_start_agent(agent)` | Sets the entry point (first agent to receive the message) |
 | `.add_handoff(source, targets)` | Defines which agents `source` can hand off to (generates `handoff_to_<name>` tools) |
+| `termination_condition=func` | Callback returning `True` to stop; used for `_max_handoffs_termination(6)` safety net |
 | `.build()` | Returns a `Workflow` instance ready for `.run()` |
+
+### Why One-Way Routing (No Back-Edges)
+
+Earlier iterations allowed specialists to hand back to triage (`add_handoff(web_agent, [triage])`). This caused **handoff loops**:
+
+1. Triage hands off to web_agent
+2. Web agent answers but the framework continues processing
+3. Web agent has nothing more to do, hands back to triage
+4. Triage sees the same question, hands off to web_agent again
+5. Repeat until termination
+
+The fix: **one-way routing** (triage → specialists only) plus a `_max_handoffs_termination(6)` safety net. Specialists answer in-scope questions and politely decline out-of-scope ones.
 
 ### Why No `with_autonomous_mode()`
 
@@ -315,7 +329,7 @@ from agent_framework import Agent
 from agent_framework.azure import AzureOpenAIResponsesClient
 
 NEW_AGENT_INSTRUCTIONS = """You are a specialist for [domain].
-If this question was misrouted, call handoff_to_triage to re-route.
+If the question is not about [domain], politely decline and explain your scope.
 """
 
 def create_new_agent(client: AzureOpenAIResponsesClient) -> Agent:
@@ -350,8 +364,8 @@ def create_workflow(triage, web_agent, license_agent=None, new_agent=None):
 
     # ... existing HandoffBuilder code ...
 
-    if new_agent:                                                  # Add
-        builder = builder.add_handoff(new_agent, [triage])
+    # Note: routing is one-way (triage → specialists only).
+    # No add_handoff(new_agent, [triage]) — specialists don't hand back.
 
     return builder.build()
 ```

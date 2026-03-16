@@ -57,8 +57,9 @@ from app.agents import chat_with_agent, get_agent_client
 load_dotenv()
 
 # Configure telemetry FIRST (before other initializations)
-# - LOCAL_DEBUG=true: Uses Agent Framework tracing with AI Toolkit (port 4317)
+# - LOCAL_TRACING=true: Uses Agent Framework tracing with AI Toolkit (port 4317)
 # - Production: Uses Azure Monitor if APPLICATIONINSIGHTS_CONNECTION_STRING is set
+# Note: LOCAL_DEBUG controls authentication only; LOCAL_TRACING controls tracing
 configure_telemetry()
 
 # Configure logging (will automatically send to App Insights if configured above)

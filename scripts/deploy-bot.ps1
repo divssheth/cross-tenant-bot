@@ -434,10 +434,12 @@ function Update-BotEnvironmentVariables {
 
     Write-Info "Applying environment variables to Container App..."
     
-    # Always force LOCAL_DEBUG=false for ACA deployment (UAMI requires cloud environment)
-    $envVars = $envVars | Where-Object { $_ -notmatch "^LOCAL_DEBUG=" }
+    # Always force LOCAL_DEBUG=false and LOCAL_TRACING=false for ACA deployment
+    # (UAMI requires cloud environment; tracing should go to App Insights not AI Toolkit)
+    $envVars = $envVars | Where-Object { $_ -notmatch "^LOCAL_DEBUG=" -and $_ -notmatch "^LOCAL_TRACING=" }
     $envVars += "LOCAL_DEBUG=false"
-    Write-Info "Forcing LOCAL_DEBUG=false for ACA deployment"
+    $envVars += "LOCAL_TRACING=false"
+    Write-Info "Forcing LOCAL_DEBUG=false and LOCAL_TRACING=false for ACA deployment"
     
     # Use --set-env-vars with all variables
     az containerapp update `
@@ -642,6 +644,82 @@ function Get-BotEndpoint {
 }
 
 # =============================================================================
+# MONITORING
+# =============================================================================
+
+function Deploy-Workbook {
+    <#
+    .SYNOPSIS
+        Deploys the Azure Monitor Workbook for bot monitoring.
+
+    .DESCRIPTION
+        Deploys the Cross-Tenant Bot Monitor workbook to Azure using the ARM template
+        in scripts/workbook-template.json. Automatically resolves the App Insights
+        resource ID from the APPLICATIONINSIGHTS_CONNECTION_STRING in .env.
+
+    .EXAMPLE
+        Deploy-Workbook
+    #>
+
+    Write-Step "Deploying Azure Monitor Workbook"
+
+    # Read connection string from .env
+    $envFile = Join-Path $PSScriptRoot ".." ".env"
+    if (-not (Test-Path $envFile)) {
+        Write-Error ".env file not found at $envFile"
+        return
+    }
+
+    $connString = (Get-Content $envFile | Where-Object { $_ -match '^APPLICATIONINSIGHTS_CONNECTION_STRING=' }) -replace '^APPLICATIONINSIGHTS_CONNECTION_STRING=', ''
+    if ([string]::IsNullOrWhiteSpace($connString)) {
+        Write-Error "APPLICATIONINSIGHTS_CONNECTION_STRING not found or empty in .env"
+        return
+    }
+
+    # Extract InstrumentationKey from connection string
+    $iKey = ($connString -split ';' | Where-Object { $_ -match '^InstrumentationKey=' }) -replace '^InstrumentationKey=', ''
+    if ([string]::IsNullOrWhiteSpace($iKey)) {
+        Write-Error "Could not extract InstrumentationKey from connection string"
+        return
+    }
+    Write-Info "Instrumentation Key: $iKey"
+
+    # Resolve App Insights resource ID (searches all resource groups in the subscription)
+    Write-Info "Looking up Application Insights resource by InstrumentationKey..."
+    $appInsightsId = az monitor app-insights component show `
+        --query "[?instrumentationKey=='$iKey'].id | [0]" -o tsv
+
+    if ([string]::IsNullOrWhiteSpace($appInsightsId)) {
+        Write-Error "Could not find Application Insights resource with key $iKey in this subscription"
+        return
+    }
+    Write-Success "Found App Insights: $appInsightsId"
+
+    # Deploy the workbook ARM template
+    $templateFile = Join-Path $PSScriptRoot "workbook-template.json"
+    if (-not (Test-Path $templateFile)) {
+        Write-Error "Workbook template not found at $templateFile"
+        return
+    }
+
+    Write-Info "Deploying workbook..."
+    az deployment group create `
+        --resource-group $script:RESOURCE_GROUP `
+        --template-file $templateFile `
+        --parameters appInsightsResourceId=$appInsightsId `
+        --name "workbook-$(Get-Date -Format 'yyyyMMdd-HHmmss')" `
+        --query "properties.provisioningState" -o tsv
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Workbook deployed successfully!"
+        Write-Info "View it: Azure Portal -> Application Insights -> Workbooks -> Cross-Tenant Bot Monitor"
+    }
+    else {
+        Write-Error "Workbook deployment failed"
+    }
+}
+
+# =============================================================================
 # QUICK REFERENCE
 # =============================================================================
 
@@ -673,6 +751,11 @@ function Show-Help {
 ║                                                                               ║
 ║    Update-BotEnvironmentVariables [-EnvFile ".env"] [-ExcludeSecrets]         ║
 ║        Sync env vars from file to ACA (defaults to .env)                      ║
+║                                                                               ║
+║  MONITORING:                                                                  ║
+║  ───────────                                                                  ║
+║    Deploy-Workbook                                                            ║
+║        Deploy Azure Monitor Workbook (auto-resolves App Insights resource)    ║
 ║                                                                               ║
 ║  VERIFICATION FUNCTIONS:                                                      ║
 ║  ───────────────────────                                                      ║

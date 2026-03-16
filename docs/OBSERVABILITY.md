@@ -7,6 +7,7 @@ Comprehensive guide to tracing, logging, evaluations, and monitoring for the Cro
 - [Overview](#overview)
 - [Quick Setup](#quick-setup)
 - [Dual-Mode Tracing](#dual-mode-tracing)
+- [Auto-Instrumented Spans & Metrics](#auto-instrumented-spans--metrics)
 - [Structured Logging](#structured-logging)
 - [Distributed Tracing](#distributed-tracing)
 - [Agent Evaluations](#agent-evaluations)
@@ -19,12 +20,14 @@ Comprehensive guide to tracing, logging, evaluations, and monitoring for the Cro
 
 ## Overview
 
-The bot supports two telemetry modes that share the same OpenTelemetry foundation:
+The bot uses **Agent Framework's built-in observability** ([docs](https://learn.microsoft.com/en-us/agent-framework/agents/observability?pivots=programming-language-python)) which auto-instruments agents, chat clients, and tool executions. Two deployment modes share the same `configure_telemetry()` entry point:
 
 | Mode | When | How | View Results |
 |------|------|-----|-------------|
-| **AI Toolkit (Local)** | `LOCAL_DEBUG=true` | `configure_otel_providers(vs_code_extension_port=4317)` | VS Code AI Toolkit trace viewer |
-| **Azure Monitor (Production)** | `APPLICATIONINSIGHTS_CONNECTION_STRING` set | `configure_azure_monitor(connection_string=...)` | Azure Portal → Application Insights |
+| **AI Toolkit (Local)** | `LOCAL_TRACING=true` | `configure_otel_providers(vs_code_extension_port=4317)` | VS Code AI Toolkit trace viewer |
+| **Azure Monitor (Production)** | `APPLICATIONINSIGHTS_CONNECTION_STRING` set | `configure_azure_monitor()` + `enable_instrumentation()` | Azure Portal → Application Insights |
+
+> **Note:** `LOCAL_TRACING` controls where traces go. `LOCAL_DEBUG` controls authentication (skip UAMI for local dev). You can use `LOCAL_DEBUG=true` + `LOCAL_TRACING=false` to debug locally while sending traces to App Insights.
 
 Both modes use the same `configure_telemetry()` entry point in [`src/app/trace_config.py`](../src/app/trace_config.py) — the function auto-selects based on your environment.
 
@@ -48,8 +51,8 @@ Both modes use the same `configure_telemetry()` entry point in [`src/app/trace_c
 | Package | Purpose |
 |---------|---------|
 | `azure-monitor-opentelemetry` | Production telemetry to Azure Monitor |
-| `opentelemetry-api` | Tracing spans and attributes |
-| `agent-framework-azure-ai[observability]` | Agent Framework tracing for AI Toolkit |
+| `opentelemetry-api` / `opentelemetry-sdk` | Tracing spans and attributes |
+| `agent-framework-core` | Built-in observability (auto-instruments agents, chat, tools) |
 | `azure-ai-evaluation` | Foundry evaluation SDK |
 
 ---
@@ -60,14 +63,15 @@ Both modes use the same `configure_telemetry()` entry point in [`src/app/trace_c
 
 1. Install the [AI Toolkit extension](https://marketplace.visualstudio.com/items?itemName=ms-windows-ai-studio.windows-ai-studio) in VS Code
 2. Open the trace collector: **Cmd/Ctrl+Shift+P** → `AI Toolkit: Open Trace` (or `ai-mlstudio.tracing.open`)
-3. Set `LOCAL_DEBUG=true` in your `.env`
+3. Set `LOCAL_DEBUG=true` and `LOCAL_TRACING=true` in your `.env`
 4. Run the bot — traces appear in the AI Toolkit panel
 
 ### Production (Azure Monitor)
 
 1. Create an Application Insights resource in Azure
 2. Set `APPLICATIONINSIGHTS_CONNECTION_STRING` in your environment
-3. Deploy — logs, traces, and metrics flow to App Insights automatically
+3. Set `LOCAL_TRACING=false` (or omit it) and `LOCAL_DEBUG=false`
+4. Deploy — Agent Framework auto-creates `invoke_agent`, `chat`, and `execute_tool` spans in App Insights
 
 ---
 
@@ -79,8 +83,8 @@ The [`trace_config.py`](../src/app/trace_config.py) module selects the telemetry
 from app.trace_config import configure_telemetry
 
 # Called once at startup in __main__.py
-# - LOCAL_DEBUG=true → Agent Framework tracing (AI Toolkit, port 4317)
-# - Production → Azure Monitor (APPLICATIONINSIGHTS_CONNECTION_STRING)
+# - LOCAL_TRACING=true → Agent Framework tracing (AI Toolkit, port 4317)
+# - Otherwise → Azure Monitor (configure_azure_monitor + enable_instrumentation)
 configure_telemetry()
 ```
 
@@ -88,28 +92,70 @@ configure_telemetry()
 
 ```python
 def configure_telemetry() -> bool:
-    local_debug = os.getenv("LOCAL_DEBUG", "").lower() in ("true", "1", "yes")
-    if local_debug:
-        if configure_agent_framework_tracing():
-            return True
-    return configure_azure_monitor_telemetry()
+    local_tracing = os.getenv("LOCAL_TRACING", "").lower() in ("true", "1", "yes")
+    if local_tracing:
+        ok = _configure_local()
+    else:
+        ok = _configure_azure_monitor()
+    ...
 ```
 
-- **`configure_agent_framework_tracing()`** — Uses `agent_framework.observability.configure_otel_providers()` to export to the AI Toolkit OTLP collector on `localhost:4317`
-- **`configure_azure_monitor_telemetry()`** — Uses `azure.monitor.opentelemetry.configure_azure_monitor()` to export to Application Insights
+**Local mode** — uses `configure_otel_providers(vs_code_extension_port=4317)` to export to the AI Toolkit OTLP collector.
+
+**Production mode** — follows [Pattern #3 from the Agent Framework docs](https://learn.microsoft.com/en-us/agent-framework/agents/observability?pivots=programming-language-python#3-third-party-setup):
+
+```python
+from azure.monitor.opentelemetry import configure_azure_monitor
+from agent_framework.observability import create_resource, enable_instrumentation
+
+# 1. Let Azure Monitor set up its providers (traces, logs, metrics)
+configure_azure_monitor(
+    connection_string=connection_string,
+    resource=create_resource(),
+    logger_name="cross-tenant-bot",
+    enable_live_metrics=True,
+)
+# 2. Activate Agent Framework instrumentation code paths
+enable_instrumentation(enable_sensitive_data=False)
+```
+
+> **Warning:** Do NOT set `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` — it activates a separate instrumentor from `azure-ai-projects` that conflicts with Agent Framework's own and causes `NonRecordingSpan` attribute errors at runtime.
+
+---
+
+## Auto-Instrumented Spans & Metrics
+
+Agent Framework automatically creates the following with **no extra code needed**:
+
+### Spans
+
+| Span Name | What It Captures |
+|-----------|------------------|
+| `invoke_agent <agent_name>` | Top-level span for each agent invocation (e.g., `invoke_agent triage`) |
+| `chat <model_name>` | LLM calls (e.g., `chat gpt-4.1`). Includes prompts/responses if `enable_sensitive_data=True` |
+| `execute_tool <function_name>` | Tool invocations (e.g., `execute_tool web_search`). Includes args/results if sensitive data enabled |
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `gen_ai.client.operation.duration` | Histogram | Duration of each chat operation (seconds) |
+| `gen_ai.client.token.usage` | Histogram | Token usage per request (input/output) |
+| `agent_framework.function.invocation.duration` | Histogram | Duration of each tool execution (seconds) |
 
 ### Custom Span Attributes
 
-The bot adds context to every trace span:
+The bot adds context to the parent `Teams Bot Agent Chat` span in `foundry_agent_client.py`:
 
 | Attribute | Source | Purpose |
 |-----------|--------|---------|
-| `agent.id` | Agent name | Identify which agent handled the request |
+| `agent.id` | Agent config | Identify the bot agent |
+| `agent.route` | Handoff events | Show routing chain (e.g., `triage → web_agent`) |
+| `agent.handoff_count` | Handoff events | Number of routing hops |
+| `agent.responding` | Output event | Which agent produced the final answer |
 | `conversation.id` | Teams activity | Correlate spans within a conversation |
 | `user.name` | Teams activity | Identify the requesting user |
-| `user.message` | User input | Track what was asked |
 | `response.length` | Agent output | Monitor response sizes |
-| `handoff.from` / `handoff.to` | Orchestrator | Track agent-to-agent routing |
 
 ---
 
@@ -282,9 +328,39 @@ For a deep-dive on evaluation setup, test data format, and custom evaluators, se
 
 ---
 
+## Workbook Dashboard
+
+The project includes a pre-built Azure Monitor Workbook ([`scripts/workbook-template.json`](../scripts/workbook-template.json)) with 7 monitoring tabs:
+
+| Tab | What It Shows |
+|-----|---------------|
+| **Health Overview** | Request volume, avg/P95 latency, failure rate (KPI tiles + timechart) |
+| **Agent Routing** | Agent invocation counts, routing chain patterns, handoff distribution |
+| **Token Usage** | Input/output tokens by model over time, totals grid |
+| **Tool Performance** | Avg/P95 tool execution duration, call counts |
+| **Errors** | Error trend (logs + exceptions + failed calls), recent exceptions grid |
+| **Conversation Drilldown** | Paste an `operation_Id` to see the full trace waterfall |
+| **Slow Requests** | P50/P95 latency trends, top 20 slowest requests |
+
+### Deploy the Workbook
+
+```powershell
+# From the repo root:
+.\scripts\deploy-bot.ps1
+Deploy-Workbook
+```
+
+The function auto-resolves the App Insights resource ID from your `.env` connection string. After deployment, open it in **Azure Portal → Application Insights → Workbooks → Cross-Tenant Bot Monitor**.
+
+All queries use a parameterized time range picker (1h / 4h / 24h / 7d / 30d).
+
+---
+
 ## KQL Queries & Dashboards
 
 Use these queries in **Application Insights → Logs** to analyze bot behavior.
+
+> **Quick reference:** See [KQL_CHEATSHEET.md](KQL_CHEATSHEET.md) for a copy-paste-ready set of queries covering traces, logs, metrics, and health dashboards.
 
 ### Common Queries
 
@@ -415,7 +491,7 @@ dependencies
 | `AZURE_AI_ENDPOINT` | Azure Portal → Azure OpenAI → Keys and Endpoint |
 | `AZURE_AI_MODEL` | Azure OpenAI Studio → Deployments (e.g., `gpt-4o`) |
 | `AZURE_AI_PROJECT_ENDPOINT` | Foundry Portal → Project → Settings → Endpoint |
-| `LOCAL_DEBUG` | Set to `true` for AI Toolkit tracing mode |
+| `LOCAL_TRACING` | Set to `true` to send traces to AI Toolkit (requires `LOCAL_DEBUG=true`) |
 
 ---
 
@@ -457,6 +533,7 @@ dependencies
 |-------|----------|
 | No data in App Insights | Verify `APPLICATIONINSIGHTS_CONNECTION_STRING` is set; data may take 2-5 minutes |
 | Missing agent spans | Ensure `configure_telemetry()` is called at startup before any agent code |
+| `NonRecordingSpan` errors | Remove `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING` — it conflicts with Agent Framework instrumentation |
 | Logs not appearing | Check logger name starts with `cross-tenant-bot` prefix |
 | AI Toolkit not showing traces | Run `AI Toolkit: Open Trace` command first; verify port 4317 is available |
 
@@ -477,4 +554,5 @@ union traces, dependencies, requests
 - [Azure AI Evaluation SDK](https://learn.microsoft.com/en-us/azure/ai-studio/how-to/evaluate-sdk)
 - [KQL Reference](https://learn.microsoft.com/en-us/kusto/query/)
 - [EVALUATION_GUIDE.md](EVALUATION_GUIDE.md) — Detailed evaluation setup and custom evaluators
+- [KQL_CHEATSHEET.md](KQL_CHEATSHEET.md) — Copy-paste KQL queries for App Insights
 - [MULTI_AGENT_ORCHESTRATION.md](MULTI_AGENT_ORCHESTRATION.md) — Agent architecture details
