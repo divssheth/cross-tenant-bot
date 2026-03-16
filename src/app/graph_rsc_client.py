@@ -29,7 +29,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("cross-tenant-bot.graph")
 
 
 def decode_token_claims(token: str) -> Dict[str, Any]:
@@ -152,15 +152,17 @@ async def get_app_token(tenant_id: Optional[str] = None) -> Optional[str]:
     when the multi-tenant app is installed in that tenant.
     
     Args:
-        tenant_id: The tenant ID to authenticate to. Falls back to AZURE_TENANT_ID if not provided.
+        tenant_id: The tenant ID to authenticate to. Falls back to GRAPH_TENANT_ID (or AZURE_TENANT_ID) if not provided.
         
     Returns:
         Access token string, or None if failed
     """
     if not tenant_id:
-        tenant_id = os.getenv("AZURE_TENANT_ID")
+        # Use GRAPH_TENANT_ID for cross-tenant scenarios (target/customer tenant)
+        # Falls back to AZURE_TENANT_ID if not set (same-tenant scenario)
+        tenant_id = os.getenv("GRAPH_TENANT_ID") or os.getenv("AZURE_TENANT_ID")
         if not tenant_id:
-            logger.error("tenant_id is required for cross-tenant Graph API access")
+            logger.error("GRAPH_TENANT_ID or AZURE_TENANT_ID is required for Graph API access")
             return None
     
     graph_app_id = os.getenv("GRAPH_APP_ID")

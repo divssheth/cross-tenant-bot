@@ -18,7 +18,7 @@ from typing import Optional, Callable, Awaitable
 
 from app.trace_config import trace_id, traceparent
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("cross-tenant-bot.server")
 
 
 # Health check endpoints that should bypass JWT authentication

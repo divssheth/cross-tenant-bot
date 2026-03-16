@@ -46,6 +46,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+devTools/
 
 # Testing
 .pytest_cache/
@@ -55,11 +56,13 @@ htmlcov/
 
 # Build artifacts
 *.zip
-CrossTenantBot.zip
 
 # App package output folders
-TeamsAppPackage/output/
-CopilotAppPackage/output/
+packages/teams/output/
+packages/copilot/output/
+
+# Evaluation results (generated during testing)
+src/app/eval/results/
 
 # Azure
 .azure/
@@ -69,3 +72,4 @@ CopilotAppPackage/output/
 
 # Temp build folder
 temp/
+.env.backup

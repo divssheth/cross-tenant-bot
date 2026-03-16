@@ -21,7 +21,7 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from collections import deque
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("cross-tenant-bot.state")
 
 
 # =============================================================================

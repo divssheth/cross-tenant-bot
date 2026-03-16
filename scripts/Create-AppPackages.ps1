@@ -4,13 +4,13 @@
 
 .DESCRIPTION
     This script reads values from .env file and creates:
-    - TeamsAppPackage/CrossTenantBot.zip (for Teams Bot)
-    - CopilotAppPackage/CrossTenantAgent.zip (for Copilot Agent)
+    - packages/teams/CrossTenantBot.zip (for Teams Bot)
+    - packages/copilot/CrossTenantAgent.zip (for Copilot Agent)
 
 .NOTES
     Prerequisites:
     - .env file with AZURE_CLIENT_ID, GRAPH_APP_ID configured
-    - Template manifest files in TeamsAppPackage and CopilotAppPackage
+    - Template manifest files in packages/teams and packages/copilot
 
 .EXAMPLE
     .\Create-AppPackages.ps1
@@ -83,7 +83,7 @@ function New-TeamsPackage {
     
     Write-Step "Creating Teams Bot Package"
     
-    $teamsDir = Join-Path $rootDir "TeamsAppPackage"
+    $teamsDir = Join-Path $rootDir "packages\teams"
     $outputDir = Join-Path $teamsDir "output"
     $templateFile = Join-Path $teamsDir "manifest.json"
     $zipFile = Join-Path $teamsDir "CrossTenantBot.zip"
@@ -139,7 +139,7 @@ function New-CopilotPackage {
     
     Write-Step "Creating Copilot Agent Package"
     
-    $copilotDir = Join-Path $rootDir "CopilotAppPackage"
+    $copilotDir = Join-Path $rootDir "packages\copilot"
     $outputDir = Join-Path $copilotDir "output"
     $templateFile = Join-Path $copilotDir "manifest.template.json"
     $zipFile = Join-Path $copilotDir "CrossTenantAgent.zip"

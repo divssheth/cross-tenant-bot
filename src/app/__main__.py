@@ -34,6 +34,7 @@ from microsoft_agents.hosting.aiohttp import CloudAdapter
 from microsoft_agents.activity import load_configuration_from_env, ConversationUpdateTypes, ActivityTypes
 
 # Local imports
+from app.trace_config import configure_telemetry
 from app.log_config import configure_logging
 from app.start_server import start_server
 from app.conversation_state import (
@@ -50,16 +51,20 @@ from app.graph_rsc_client import (
     get_user_by_id,
     format_messages_for_context,
 )
+from app.agents import chat_with_agent, get_agent_client
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Configure telemetry FIRST (before other initializations)
+# - LOCAL_TRACING=true: Uses Agent Framework tracing with AI Toolkit (port 4317)
+# - Production: Uses Azure Monitor if APPLICATIONINSIGHTS_CONNECTION_STRING is set
+# Note: LOCAL_DEBUG controls authentication only; LOCAL_TRACING controls tracing
+configure_telemetry()
+
+# Configure logging (will automatically send to App Insights if configured above)
+configure_logging()
+logger = logging.getLogger("cross-tenant-bot")
 
 
 class BotConfig:
@@ -309,11 +314,11 @@ class CrossTenantBot:
             # Send the response back to the user
             await context.send_activity(response)
 
-            # Track bot response in conversation state
+            # Track bot response in conversation state (full text for multi-turn context)
             if conversation_id:
                 conversation_manager.add_bot_message(
                     conversation_id=conversation_id,
-                    text=response[:200] + "..." if len(response) > 200 else response
+                    text=response
                 )
 
         except Exception as e:
@@ -710,9 +715,37 @@ _Retrieved using application permissions (RSC)_
             return f"❌ Error looking up user: {str(e)}"
 
     async def _handle_default(self, message: str, user_context: UserContext) -> str:
-        """Handle default message - echo back the message."""
+        """
+        Handle default message - send to Foundry agent for AI-powered response.
+        
+        Falls back to echo if Foundry is not configured.
+        """
         ctx = user_context.to_dict()
-
+        
+        # Try to get response from Foundry agent
+        agent_client = get_agent_client()
+        
+        if agent_client.is_configured:
+            try:
+                # Build context from conversation state if available
+                additional_context = None
+                if ctx['is_cross_tenant'] and user_context.user_tenant_id:
+                    additional_context = f"User is from a different tenant: {user_context.user_tenant_id[:20]}..."
+                
+                response = await chat_with_agent(
+                    message=message,
+                    conversation_id=ctx['conversation_id'],
+                    user_name=ctx['user_name'],
+                    context=additional_context
+                )
+                
+                return response
+                
+            except Exception as e:
+                logger.error(f"Error calling Foundry agent: {e}", exc_info=True)
+                # Fall through to echo response on error
+        
+        # Fallback: echo response when Foundry is not configured
         response = f"You said: **{message}**"
 
         if ctx['is_cross_tenant'] and user_context.user_tenant_id:
@@ -720,6 +753,8 @@ _Retrieved using application permissions (RSC)_
                 f"\n\n_This is a cross-tenant message. "
                 f"You are from {user_context.user_tenant_id[:20]}..._"
             )
+        
+        response += "\n\n_💡 Configure FOUNDRY_PROJECT_ENDPOINT to enable AI-powered responses._"
 
         return response
 
@@ -813,35 +848,48 @@ if os.getenv("WEBSITE_INSTANCE_ID") or os.getenv("CONTAINER_APP_NAME"):
 else:
     logger.info("⚠️ Running locally - skipping UAMI test (no managed identity available)")
 
+# Check for local debug mode
+local_debug = os.getenv("LOCAL_DEBUG", "").lower() in ("true", "1", "yes")
+
 # Create connection manager for CloudAdapter
 # For UserAssignedMSI: The UAMI Client ID IS the Bot App ID - they are the same
-try:
-    connection_manager = MsalConnectionManager(
-        connections_configurations={
-            "SERVICE_CONNECTION": {
-                "client_id": bot_app_id,  # UAMI Client ID = Bot App ID
-                "tenant_id": config.azure_tenant_id or "",
-                "auth_type": AuthTypes.user_managed_identity,
-                "connection_name": "SERVICE_CONNECTION",
+if local_debug:
+    # Local development - skip authentication for agentsplayground/emulator
+    logger.info("🔧 LOCAL_DEBUG enabled - creating adapter without authentication")
+    adapter = CloudAdapter()
+    logger.info("✅ CloudAdapter created for local development (no auth)")
+else:
+    # Production - use MSAL with UAMI authentication
+    try:
+        # Use CONNECTIONS kwargs format (alternative to connections_configurations)
+        connection_manager = MsalConnectionManager(
+            CONNECTIONS={
+                "SERVICE_CONNECTION": {
+                    "SETTINGS": {
+                        "auth_type": AuthTypes.user_managed_identity,
+                        "client_id": bot_app_id,  # UAMI Client ID = Bot App ID
+                        "tenant_id": config.azure_tenant_id or "",
+                        "connection_name": "SERVICE_CONNECTION",
+                    }
+                }
             }
-        }
-    )
-    logger.info("✅ Connection manager created with UserManagedIdentity auth")
-    logger.info(f"   App ID: {bot_app_id}")
-    logger.info(f"   Tenant ID: {config.azure_tenant_id}")
+        )
+        logger.info("✅ Connection manager created with UserManagedIdentity auth")
+        logger.info(f"   App ID: {bot_app_id}")
+        logger.info(f"   Tenant ID: {config.azure_tenant_id}")
 
-except Exception as e:
-    logger.error(f"❌ CRITICAL: Failed to create MsalConnectionManager: {e}", exc_info=True)
-    logger.error("❌ Cannot proceed without UAMI authentication - bot will not work correctly")
-    raise RuntimeError(f"MsalConnectionManager initialization failed: {e}") from e
+    except Exception as e:
+        logger.error(f"❌ CRITICAL: Failed to create MsalConnectionManager: {e}", exc_info=True)
+        logger.error("❌ Cannot proceed without UAMI authentication - bot will not work correctly")
+        raise RuntimeError(f"MsalConnectionManager initialization failed: {e}") from e
 
-# Create adapter with connection manager - no fallback
-try:
-    adapter = CloudAdapter(connection_manager=connection_manager)
-    logger.info("✅ CloudAdapter created with connection manager")
-except Exception as e:
-    logger.error(f"❌ CRITICAL: Failed to create CloudAdapter: {e}", exc_info=True)
-    raise RuntimeError(f"CloudAdapter initialization failed: {e}") from e
+    # Create adapter with connection manager - no fallback
+    try:
+        adapter = CloudAdapter(connection_manager=connection_manager)
+        logger.info("✅ CloudAdapter created with connection manager")
+    except Exception as e:
+        logger.error(f"❌ CRITICAL: Failed to create CloudAdapter: {e}", exc_info=True)
+        raise RuntimeError(f"CloudAdapter initialization failed: {e}") from e
 
 # Create storage for state management
 STORAGE = MemoryStorage()
@@ -930,9 +978,12 @@ if __name__ == "__main__":
         logger.info(f"  UAMI Client ID: {config.azure_client_id}")
         logger.info(f"  Graph App ID: {os.getenv('GRAPH_APP_ID', 'Not set')}")
         logger.info(f"  Key Vault: {os.getenv('KEY_VAULT_NAME', 'Not set')}")
+        logger.info(f"  LOCAL_DEBUG: {local_debug}")
         logger.info("=" * 80)
         
-        start_server(AGENT_APP, auth_config)
+        # For local development, pass None to skip JWT auth
+        server_auth_config = None if local_debug else auth_config
+        start_server(AGENT_APP, server_auth_config)
     except Exception as error:
         logger.error(f"Failed to start bot: {error}", exc_info=True)
         raise error

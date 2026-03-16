@@ -1,0 +1,41 @@
+# Environment files - NEVER include secrets in Docker images
+.env
+.env.*
+env.prod
+env.TEMPLATE
+
+# Git
+.git
+.gitignore
+
+# Python - Virtual environments (300+ MB!)
+__pycache__
+**/__pycache__
+*.py[cod]
+*$py.class
+.venv
+venv
+**/.venv
+**/venv
+.pytest_cache
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Development tools
+devTools
+*.ps1
+
+# Documentation
+*.md
+
+# Tests (not needed in production)
+tests
+!README.md
+
+# Teams/Copilot app packages
+TeamsAppPackage/
+CopilotAppPackage/

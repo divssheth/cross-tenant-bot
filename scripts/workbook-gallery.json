@@ -1,0 +1,524 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Cross-Tenant Bot Monitor\nReal-time monitoring for the multi-agent Teams bot. Select a time range and navigate tabs to explore."
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "3a4b5c6d-7e8f-9012-3456-789abcdef012",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time Range",
+            "type": 4,
+            "isRequired": true,
+            "typeSettings": {
+              "selectableValues": [
+                { "durationMs": 3600000 },
+                { "durationMs": 14400000 },
+                { "durationMs": 86400000, "isInitialTime": true },
+                { "durationMs": 604800000 },
+                { "durationMs": 2592000000 }
+              ],
+              "allowCustom": true
+            },
+            "value": { "durationMs": 86400000 }
+          }
+        ],
+        "style": "above"
+      },
+      "name": "time-parameters"
+    },
+    {
+      "type": 11,
+      "content": {
+        "version": "LinkItem/1.0",
+        "style": "tabs",
+        "links": [
+          {
+            "id": "d3e4f5a6-b7c8-9012-defa-012345678902",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Health Overview",
+            "subTarget": "health",
+            "style": "link"
+          },
+          {
+            "id": "e4f5a6b7-c8d9-0123-efab-012345678903",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Agent Routing",
+            "subTarget": "routing",
+            "style": "link"
+          },
+          {
+            "id": "f5a6b7c8-d9e0-1234-fabc-012345678904",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Token Usage",
+            "subTarget": "tokens",
+            "style": "link"
+          },
+          {
+            "id": "a6b7c8d9-e0f1-2345-abcd-012345678905",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Tool Performance",
+            "subTarget": "tools",
+            "style": "link"
+          },
+          {
+            "id": "b7c8d9e0-f1a2-3456-bcde-012345678906",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Errors",
+            "subTarget": "errors",
+            "style": "link"
+          },
+          {
+            "id": "c8d9e0f1-a2b3-4567-cdef-012345678907",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Conversation Drilldown",
+            "subTarget": "drilldown",
+            "style": "link"
+          },
+          {
+            "id": "d9e0f1a2-b3c4-5678-defa-012345678908",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Slow Requests",
+            "subTarget": "slow",
+            "style": "link"
+          }
+        ]
+      },
+      "name": "tabs"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": 0,
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Health Overview\nRequest volume, latency distribution, and failure rate for agent chat operations."
+            },
+            "name": "health-title"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "dependencies\n| where name has 'Agent Chat'\n| summarize Total=count(), AvgLat=round(avg(duration),0), P95Lat=round(percentile(duration,95),0), FailPct=round(100.0*countif(success==false)/count(),2)\n| project Metric='Total Requests', Value=toreal(Total)\n| union (dependencies | where name has 'Agent Chat' | summarize v=round(avg(duration),0) | project Metric='Avg Latency (ms)', Value=toreal(v))\n| union (dependencies | where name has 'Agent Chat' | summarize v=round(percentile(duration,95),0) | project Metric='P95 Latency (ms)', Value=toreal(v))\n| union (dependencies | where name has 'Agent Chat' | summarize v=round(100.0*countif(success==false)/count(),2) | project Metric='Failure Rate %', Value=toreal(v))",
+              "size": 4,
+              "title": "Key Metrics",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Metric",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "auto"
+                  },
+                  "numberFormat": {
+                    "unit": 17,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "showBorder": true
+              }
+            },
+            "name": "health-kpi"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "dependencies\n| where name has 'Agent Chat'\n| summarize Requests=count(), ['Avg Latency (ms)']=avg(duration), ['P95 Latency (ms)']=percentile(duration,95) by bin(timestamp, {TimeRange:grain})",
+              "size": 0,
+              "title": "Request Volume & Latency Over Time",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "timechart",
+              "chartSettings": {
+                "showLegend": true
+              }
+            },
+            "name": "health-trend"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "health"
+      },
+      "name": "health-group"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": 0,
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Agent Routing\nWhich agents handle requests, routing chains, and handoff patterns."
+            },
+            "name": "routing-title"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "dependencies\n| where name has 'invoke_agent'\n| extend agentName = tostring(customDimensions['gen_ai.agent.name'])\n| summarize Invocations=count(), ['Avg Duration (ms)']=round(avg(duration),0), Failures=countif(success==false) by agentName\n| order by Invocations desc",
+              "size": 0,
+              "title": "Agent Invocations",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "barchart"
+            },
+            "name": "routing-invocations"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "dependencies\n| where name has 'Agent Chat'\n| extend route = tostring(customDimensions['agent.route'])\n| where isnotempty(route)\n| summarize Count=count(), ['Avg Duration (ms)']=round(avg(duration),0) by ['Routing Chain']=route\n| order by Count desc",
+              "size": 0,
+              "title": "Routing Chains",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "table"
+            },
+            "name": "routing-chains"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "dependencies\n| where name has 'Agent Chat'\n| extend handoffs = toint(customDimensions['agent.handoff_count'])\n| where isnotnull(handoffs)\n| summarize Count=count() by ['Handoff Count']=handoffs\n| order by ['Handoff Count'] asc",
+              "size": 1,
+              "title": "Handoff Count Distribution",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "piechart"
+            },
+            "name": "routing-handoffs"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "routing"
+      },
+      "name": "routing-group"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": 0,
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Token Usage\nInput and output token consumption by model over time."
+            },
+            "name": "tokens-title"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "customMetrics\n| where name == 'gen_ai.client.token.usage'\n| extend model = tostring(customDimensions['gen_ai.request.model']), tokenType = tostring(customDimensions['gen_ai.token.type'])\n| summarize Tokens=sum(value) by Series=strcat(model, ' (', tokenType, ')'), bin(timestamp, {TimeRange:grain})",
+              "size": 0,
+              "title": "Token Usage Over Time",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "timechart",
+              "chartSettings": {
+                "showLegend": true
+              }
+            },
+            "name": "tokens-trend"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "customMetrics\n| where name == 'gen_ai.client.token.usage'\n| extend Model = tostring(customDimensions['gen_ai.request.model']), ['Token Type'] = tostring(customDimensions['gen_ai.token.type'])\n| summarize ['Total Tokens']=sum(value) by Model, ['Token Type']\n| order by ['Total Tokens'] desc",
+              "size": 0,
+              "title": "Token Totals by Model",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "table"
+            },
+            "name": "tokens-totals"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "tokens"
+      },
+      "name": "tokens-group"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": 0,
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Tool Performance\nExecution duration and call counts for agent tools."
+            },
+            "name": "tools-title"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "customMetrics\n| where name == 'agent_framework.function.invocation.duration'\n| extend tool = tostring(customDimensions['gen_ai.tool.name'])\n| summarize ['Avg (ms)']=round(avg(value)*1000,0), ['P95 (ms)']=round(percentile(value,95)*1000,0), Calls=count() by tool\n| order by Calls desc",
+              "size": 0,
+              "title": "Tool Duration (Avg & P95)",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "barchart"
+            },
+            "name": "tools-duration"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "customMetrics\n| where name == 'agent_framework.function.invocation.duration'\n| extend Tool = tostring(customDimensions['gen_ai.tool.name'])\n| summarize Calls=count(), ['Avg (ms)']=round(avg(value)*1000,0), ['P95 (ms)']=round(percentile(value,95)*1000,0), ['Max (ms)']=round(max(value)*1000,0) by Tool\n| order by Calls desc",
+              "size": 0,
+              "title": "Tool Stats",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "table"
+            },
+            "name": "tools-stats"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "tools"
+      },
+      "name": "tools-group"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": 0,
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Error Analysis\nError trends, exceptions, and failed agent calls."
+            },
+            "name": "errors-title"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let errors = traces | where severityLevel >= 3 | summarize value=count() by bin(timestamp, {TimeRange:grain}) | extend series='Log Errors';\nlet exc = exceptions | summarize value=count() by bin(timestamp, {TimeRange:grain}) | extend series='Exceptions';\nlet fails = dependencies | where (name has 'Agent Chat' or name has 'invoke_agent') and success == false | summarize value=count() by bin(timestamp, {TimeRange:grain}) | extend series='Failed Calls';\nunion errors, exc, fails\n| order by timestamp asc",
+              "size": 0,
+              "title": "Error Trend",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "timechart",
+              "chartSettings": {
+                "showLegend": true
+              }
+            },
+            "name": "errors-trend"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "exceptions\n| project timestamp, Type=type, Message=outerMessage, ['Inner Message']=innermostMessage, operation_Id\n| order by timestamp desc\n| take 50",
+              "size": 0,
+              "title": "Recent Exceptions",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "table"
+            },
+            "name": "errors-exceptions"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "dependencies\n| where (name has 'invoke_agent' or name has 'Agent Chat')\n| where success == false\n| project timestamp, Name=name, ['Duration (ms)']=round(duration,0), resultCode, operation_Id\n| order by timestamp desc\n| take 50",
+              "size": 0,
+              "title": "Failed Agent Calls",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "table"
+            },
+            "name": "errors-failed"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "errors"
+      },
+      "name": "errors-group"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": 0,
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Conversation Drilldown\nPaste an `operation_Id` from another tab (e.g. Errors or Slow Requests) to see the full trace waterfall."
+            },
+            "name": "drilldown-title"
+          },
+          {
+            "type": 9,
+            "content": {
+              "version": "KqlParameterItem/1.0",
+              "parameters": [
+                {
+                  "id": "e0f1a2b3-c4d5-6789-efab-012345678909",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "ConversationId",
+                  "label": "Operation / Conversation ID",
+                  "type": 1,
+                  "description": "Paste an operation_Id or conversation.id to drill down"
+                }
+              ],
+              "style": "above"
+            },
+            "name": "drilldown-params"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "union dependencies, requests, traces, exceptions\n| where '{ConversationId}' != '' and (operation_Id == '{ConversationId}' or tostring(customDimensions['conversation.id']) == '{ConversationId}')\n| project timestamp, Type=itemType, Name=coalesce(name, type, ''), Message=coalesce(message, outerMessage, ''), ['Duration (ms)']=round(duration,0), success, severityLevel, operation_Id\n| order by timestamp asc",
+              "size": 0,
+              "title": "Trace Waterfall",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "table"
+            },
+            "name": "drilldown-waterfall"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "drilldown"
+      },
+      "name": "drilldown-group"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": 0,
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Slow Request Analysis\nP50/P95 latency trends and the slowest individual requests."
+            },
+            "name": "slow-title"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "dependencies\n| where name has 'Agent Chat'\n| summarize ['P50 (ms)']=percentile(duration,50), ['P95 (ms)']=percentile(duration,95) by bin(timestamp, {TimeRange:grain})",
+              "size": 0,
+              "title": "Latency Percentiles Over Time",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "timechart",
+              "chartSettings": {
+                "showLegend": true
+              }
+            },
+            "name": "slow-trend"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "dependencies\n| where name has 'Agent Chat'\n| extend route = tostring(customDimensions['agent.route']), responding = tostring(customDimensions['agent.responding'])\n| top 20 by duration desc\n| project timestamp, ['Duration (ms)']=round(duration,0), Route=route, ['Responding Agent']=responding, success, operation_Id",
+              "size": 0,
+              "title": "Top 20 Slowest Requests",
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.insights/components",
+              "visualization": "table"
+            },
+            "name": "slow-top20"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "slow"
+      },
+      "name": "slow-group"
+    }
+  ],
+  "fallbackResourceIds": [],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
