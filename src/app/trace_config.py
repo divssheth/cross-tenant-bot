@@ -16,7 +16,14 @@ import contextvars
 from typing import Optional
 
 from opentelemetry import trace
-from opentelemetry.trace import Tracer
+from opentelemetry.trace import Tracer, NonRecordingSpan
+
+# Monkey-patch: azure.ai.projects.telemetry._responses_instrumentor accesses
+# span.span_instance.attributes, but NonRecordingSpan lacks that attribute
+# (it only has set_attributes).  Adding a read-only property prevents the
+# AttributeError crash inside the SDK.
+if not hasattr(NonRecordingSpan, "attributes"):
+    NonRecordingSpan.attributes = property(lambda self: {})
 
 # Context variables for distributed tracing
 trace_id: contextvars.ContextVar[str] = contextvars.ContextVar('trace_id', default='')
@@ -66,6 +73,15 @@ def _configure_local() -> bool:
             enable_sensitive_data=True,
         )
         logger.info("Agent Framework tracing configured (AI Toolkit, OTLP port 4317)")
+
+        try:
+            from azure.ai.projects.telemetry import AIProjectInstrumentor
+            instrumentor = AIProjectInstrumentor()
+            instrumentor.instrument(enable_content_recording=True)
+            logger.info("AIProjectInstrumentor enabled (content recording on, instrumented=%s)", instrumentor.is_instrumented())
+        except Exception as e:
+            logger.warning("AIProjectInstrumentor failed: %s", e)
+
         return True
     except Exception as e:
         logger.error(f"Failed to configure local tracing: {e}")
@@ -94,6 +110,14 @@ def _configure_azure_monitor() -> bool:
             enable_live_metrics=True,
         )
         enable_instrumentation(enable_sensitive_data=False)
+
+        try:
+            from azure.ai.projects.telemetry import AIProjectInstrumentor
+            instrumentor = AIProjectInstrumentor()
+            instrumentor.instrument(enable_content_recording=False)
+            logger.info("AIProjectInstrumentor enabled (content recording off, instrumented=%s)", instrumentor.is_instrumented())
+        except Exception as e:
+            logger.warning("AIProjectInstrumentor failed: %s", e)
 
         logger.info("Azure Monitor telemetry configured with Agent Framework instrumentation")
         return True

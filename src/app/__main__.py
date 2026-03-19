@@ -66,6 +66,15 @@ configure_telemetry()
 configure_logging()
 logger = logging.getLogger("cross-tenant-bot")
 
+# Log telemetry status now that logging is configured
+try:
+    from app.trace_config import is_telemetry_enabled
+    from azure.ai.projects.telemetry import AIProjectInstrumentor
+    logger.info("Telemetry enabled: %s, AIProjectInstrumentor active: %s",
+                is_telemetry_enabled(), AIProjectInstrumentor().is_instrumented())
+except Exception as e:
+    logger.warning("Telemetry status check failed: %s", e)
+
 
 class BotConfig:
     """

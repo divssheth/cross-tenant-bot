@@ -119,7 +119,7 @@ configure_azure_monitor(
 enable_instrumentation(enable_sensitive_data=False)
 ```
 
-> **Warning:** Do NOT set `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` — it activates a separate instrumentor from `azure-ai-projects` that conflicts with Agent Framework's own and causes `NonRecordingSpan` attribute errors at runtime.
+> **Note:** Set `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` in your environment. `AIProjectInstrumentor.instrument()` requires this env var — without it, the instrumentor silently no-ops. A monkey-patch in `trace_config.py` handles the `NonRecordingSpan` SDK bug.
 
 ---
 
@@ -533,7 +533,7 @@ dependencies
 |-------|----------|
 | No data in App Insights | Verify `APPLICATIONINSIGHTS_CONNECTION_STRING` is set; data may take 2-5 minutes |
 | Missing agent spans | Ensure `configure_telemetry()` is called at startup before any agent code |
-| `NonRecordingSpan` errors | Remove `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING` — it conflicts with Agent Framework instrumentation |
+| `NonRecordingSpan` errors | Ensure `trace_config.py` is imported before `AIProjectInstrumentor.instrument()` — the monkey-patch adds the missing `attributes` property |
 | Logs not appearing | Check logger name starts with `cross-tenant-bot` prefix |
 | AI Toolkit not showing traces | Run `AI Toolkit: Open Trace` command first; verify port 4317 is available |
 

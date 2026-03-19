@@ -71,7 +71,7 @@ The bot uses [Microsoft Agent Framework](https://github.com/microsoft/agent-fram
 ```python
 from agent_framework.orchestrations import HandoffBuilder
 
-# Agents are created from AzureOpenAIResponsesClient or AzureAIAgentClient
+# Local agents created via AzureOpenAIResponsesClient; Foundry agents retrieved via AzureAIProjectAgentProvider
 workflow = (
     HandoffBuilder(
         name="ms-expert-orchestration",

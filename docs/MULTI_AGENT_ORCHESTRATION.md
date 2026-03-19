@@ -31,7 +31,7 @@ This bot uses **multi-agent orchestration** to route Microsoft-related questions
 |---------|-------------|-------------|
 | Tool isolation | All tools on one agent (confusing prompts) | Each specialist gets only its tools |
 | Prompt size | One massive instruction set | Focused, concise instructions per agent |
-| Foundry integration | Must proxy deployed agents behind wrapper tools | Native `AzureAIAgentClient` as a first-class participant |
+| Foundry integration | Must proxy deployed agents behind wrapper tools | Native `AzureAIProjectAgentProvider` retrieves persistent agents as first-class participants |
 | Evaluation | Can't measure routing accuracy | Routing introspection per-query |
 
 ---
@@ -150,30 +150,27 @@ def create_web_agent(client: AzureOpenAIResponsesClient) -> Agent:
 | Property | Value |
 |----------|-------|
 | **File** | `src/app/agents/license_agent.py` |
-| **Client** | `Agent(AzureAIAgentClient(...))` |
+| **Client** | `AzureAIProjectAgentProvider.get_agent()` |
 | **Name** | `license_agent` |
 | **Handoff targets** | None (one-way routing from triage only) |
 | **Tools** | Deployed Foundry agent's own tools + knowledge base |
 
-The license agent connects to a **pre-deployed Foundry agent** by name. The deployed agent has its own instructions, tools (Azure AI Search knowledge base), and model. No local tools or wrapper needed.
+The license agent is **retrieved** from a pre-deployed Foundry agent by name using the v2 SDK. No new `asst_*` instances are created. The deployed agent has its own instructions, tools (Azure AI Search knowledge base), and model.
 
 ```python
-azure_ai_agent_client = AzureAIAgentClient(
-    agent_name=agent_name,              # e.g. "unified-knowledge-agent-1"
-    credential=async_credential,
-    project_endpoint=endpoint,
-    model_deployment_name=os.getenv("AZURE_AI_MODEL", "gpt-4.1"),
-)
+from agent_framework.azure import AzureAIProjectAgentProvider
 
-return Agent(
-    azure_ai_agent_client,
-    instructions="Answer licensing questions using your knowledge base. If the question is not about licensing, answer to the best of your ability.",
-    name="license_agent",
-    description="Handles Microsoft 365 licensing, subscription, and entitlement questions using a specialized knowledge base",
+provider = AzureAIProjectAgentProvider(
+    project_endpoint=endpoint,
+    credential=async_credential,
 )
+agent = await provider.get_agent(name=agent_name)  # e.g. "unified-knowledge-agent-1"
+agent.name = "license_agent"  # Match triage handoff tool name
+
+return agent, provider  # Caller must keep provider alive
 ```
 
-**Key distinction**: `agent_name` (not `agent_id`) is used because the value is a human-readable name, not an `asst_...` ID.
+**Key distinction**: `get_agent(name=...)` retrieves the persistent Foundry agent by its human-readable name (e.g. `unified-knowledge-agent-1`). No `asst_*` IDs are involved.
 
 ---
 
@@ -412,7 +409,7 @@ In `foundry_agent_client.py`, update `_ensure_agents_created()` and `_create_wor
 | `@tool` | `agent-framework` | `from agent_framework import tool` |
 | `MCPStreamableHTTPTool` | `agent-framework` | `from agent_framework import MCPStreamableHTTPTool` |
 | `AzureOpenAIResponsesClient` | `agent-framework-azure-ai` | `from agent_framework.azure import AzureOpenAIResponsesClient` |
-| `AzureAIAgentClient` | `agent-framework-azure-ai` | `from agent_framework.azure import AzureAIAgentClient` |
+| `AzureAIProjectAgentProvider` | `agent-framework-azure-ai` | `from agent_framework.azure import AzureAIProjectAgentProvider` |
 | `HandoffBuilder` | `agent-framework-orchestrations` | `from agent_framework.orchestrations import HandoffBuilder` |
 | `configure_otel_providers` | `agent-framework` | `from agent_framework.observability import configure_otel_providers` |
 
@@ -430,7 +427,7 @@ If migrating from an earlier pre-release version:
 | `Agent(chat_client=client)` | `Agent(client, ...)` | `chat_client` keyword → positional first argument |
 | `.set_coordinator(agent)` | `.with_start_agent(agent)` | `HandoffBuilder` method renamed |
 | `.with_interaction_mode("autonomous", ...)` | `.with_autonomous_mode(...)` | `HandoffBuilder` method renamed |
-| `AzureAIAgentClient(agent_id="name")` | `AzureAIAgentClient(agent_name="name")` | `agent_id` now expects `asst_...` format; use `agent_name` for human-readable names |
+| `AzureAIAgentClient(agent_name="name")` | `AzureAIProjectAgentProvider.get_agent(name="name")` | V2 SDK retrieves persistent agents; no `asst_*` creation |
 
 ---
 

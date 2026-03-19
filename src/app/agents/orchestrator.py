@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 from agent_framework import Agent
-from agent_framework.azure import AzureOpenAIResponsesClient
+from agent_framework.azure import AzureAIProjectAgentProvider, AzureOpenAIResponsesClient
 from agent_framework.orchestrations import HandoffBuilder
 
 from app.agents.triage_agent import create_triage_agent
@@ -14,25 +14,28 @@ from app.agents.license_agent import create_license_agent
 logger = logging.getLogger("cross-tenant-bot.agents.orchestrator")
 
 
-def create_agents(client: AzureOpenAIResponsesClient, credential) -> tuple[Agent, Agent, Optional[Agent]]:
+async def create_agents(
+    client: AzureOpenAIResponsesClient,
+) -> tuple[Agent, Agent, Optional[Agent], Optional[AzureAIProjectAgentProvider]]:
     """Create all specialist agent instances.
 
     Args:
         client: AzureOpenAIResponsesClient for creating local agents.
-        credential: Azure credential for the license agent's Foundry connection.
 
     Returns:
-        Tuple of (triage_agent, web_agent, license_agent). license_agent may be None.
+        Tuple of (triage_agent, web_agent, license_agent, license_provider).
+        license_agent and license_provider may be None.
+        The caller must keep license_provider alive for the agent's lifetime.
     """
     triage = create_triage_agent(client)
     web_agent = create_web_agent(client)
-    license_agent = create_license_agent(client, credential)
+    license_agent, license_provider = await create_license_agent()
 
     agents = ["triage", "web_agent"]
     if license_agent:
         agents.append("license_agent")
     logger.info(f"Agents created: {', '.join(agents)}")
-    return triage, web_agent, license_agent
+    return triage, web_agent, license_agent, license_provider
 
 
 def _max_handoffs_termination(max_handoffs: int):

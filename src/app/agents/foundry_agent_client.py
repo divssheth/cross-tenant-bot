@@ -12,7 +12,7 @@ from typing import Optional, Any
 from dataclasses import dataclass
 
 from agent_framework import AgentResponseUpdate, Message
-from agent_framework.azure import AzureOpenAIResponsesClient
+from agent_framework.azure import AzureAIProjectAgentProvider, AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential, ManagedIdentityCredential, AzureCliCredential
 from opentelemetry.trace import SpanKind, StatusCode
 from opentelemetry import trace
@@ -77,6 +77,7 @@ class FoundryAgentClient:
         self._triage = None
         self._web_agent = None
         self._license_agent = None
+        self._license_provider: Optional[AzureAIProjectAgentProvider] = None
         self._client: Optional[AzureOpenAIResponsesClient] = None
 
     @property
@@ -114,8 +115,8 @@ class FoundryAgentClient:
             deployment_name=self.model_deployment_name,
         )
 
-        self._triage, self._web_agent, self._license_agent = create_agents(
-            self._client, credential
+        self._triage, self._web_agent, self._license_agent, self._license_provider = (
+            await create_agents(self._client)
         )
         self._agents_created = True
         logger.info(f"Multi-agent orchestration ready: {self.agent_name}")
@@ -326,8 +327,11 @@ class FoundryAgentClient:
                 error=error_msg
             )
 
-    def cleanup(self):
+    async def cleanup(self):
         """Clean up resources (call on shutdown)."""
+        if self._license_provider:
+            await self._license_provider.close()
+            self._license_provider = None
         self._agents_created = False
         self._triage = None
         self._web_agent = None
