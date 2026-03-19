@@ -110,7 +110,7 @@ The triage agent analyzes user intent and calls a handoff function (`handoff_to_
 - `MCPStreamableHTTPTool` — Microsoft Learn MCP server (`https://learn.microsoft.com/api/mcp`) for documentation search, page fetching, and code sample search
 - `decode_microsoft_acronym` — Local `@ai_function` tool for instant acronym decoding (AKS, RBAC, M365, etc.)
 
-**License Agent** — Created from `AzureAIAgentClient` which connects to a deployed Foundry agent. The deployed agent has its own instructions, tools, and knowledge base (Azure AI Search index). No local configuration needed beyond the agent name and project endpoint.
+**License Agent** — Retrieved from Azure AI Foundry via `AzureAIProjectAgentProvider.get_agent()` (v2 SDK). The deployed agent has its own instructions, tools, and knowledge base (Azure AI Search index). No local configuration needed beyond the agent name and project endpoint.
 
 ### Building the Workflow
 
@@ -161,28 +161,21 @@ This gives the agent access to three tools from a single MCP endpoint:
 
 ### Connecting to Foundry-Deployed Agents
 
-The license agent demonstrates how to use `AzureAIAgentClient` to connect to an agent that's already deployed in Azure AI Foundry:
+The license agent demonstrates how to use `AzureAIProjectAgentProvider` (Foundry v2 SDK) to retrieve an existing persistent agent — no new `asst_*` instances are created:
 
 ```python
-from agent_framework import Agent
-from agent_framework.azure import AzureAIAgentClient
+from agent_framework.azure import AzureAIProjectAgentProvider
 
-azure_ai_agent_client = AzureAIAgentClient(
-    agent_name="unified-knowledge-agent-1",
-    credential=async_credential,
+provider = AzureAIProjectAgentProvider(
     project_endpoint=os.getenv("AZURE_AI_PROJECT_ENDPOINT"),
-    model_deployment_name=os.getenv("AZURE_AI_MODEL", "gpt-4.1"),
+    credential=async_credential,
 )
 
-license_agent = Agent(
-    azure_ai_agent_client,
-    instructions="Answer licensing questions using your knowledge base. If the question is not about licensing, answer to the best of your ability.",
-    name="license_agent",
-    description="Handles Microsoft 365 licensing questions",
-)
+agent = await provider.get_agent(name="unified-knowledge-agent-1")
+agent.name = "license_agent"  # Match triage handoff tool name
 ```
 
-The deployed agent's own instructions, tools, and knowledge base are used directly — no local wrapper needed.
+The deployed agent's own instructions, tools, and knowledge base are used directly — no local wrapper needed. The provider must be kept alive for the agent's lifetime and closed on shutdown.
 
 ## Enterprise Observability
 
@@ -231,7 +224,7 @@ enable_instrumentation(enable_sensitive_data=False)
 
 `configure_azure_monitor()` sets up the OpenTelemetry pipeline (exporters, processors, resource attributes). `enable_instrumentation()` activates the Agent Framework's code-path hooks that create spans for agents, chat calls, and tools. The order matters — Azure Monitor must be configured first so the Agent Framework's spans have somewhere to go.
 
-> **Warning:** Do **not** set `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true`. It activates a separate instrumentor from `azure-ai-projects` that conflicts with Agent Framework's own instrumentation and causes `NonRecordingSpan` attribute errors at runtime.
+> **Note:** Set `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` in your environment. `AIProjectInstrumentor.instrument()` requires this env var — without it, the instrumentor silently no-ops. A monkey-patch in `trace_config.py` handles the `NonRecordingSpan` SDK bug that previously caused attribute errors.
 
 ### What Gets Auto-Instrumented
 

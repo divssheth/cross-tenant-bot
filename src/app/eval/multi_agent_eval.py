@@ -104,6 +104,7 @@ class MultiAgentEvalTarget:
         self._triage = None
         self._web_agent = None
         self._license_agent = None
+        self._license_provider = None
         self._client = None
 
     async def initialize(self):
@@ -118,6 +119,7 @@ class MultiAgentEvalTarget:
         endpoint = os.getenv("AZURE_AI_ENDPOINT") or os.getenv("FOUNDRY_PROJECT_ENDPOINT")
         model = os.getenv("AZURE_AI_MODEL") or os.getenv("FOUNDRY_MODEL_DEPLOYMENT_NAME", "gpt-4o")
 
+        local_tracing = os.getenv("LOCAL_TRACING", "").lower() in ("true", "1", "yes")
         local_debug = os.getenv("LOCAL_DEBUG", "").lower() in ("true", "1", "yes")
         client_id = os.getenv("AZURE_CLIENT_ID")
 
@@ -129,7 +131,7 @@ class MultiAgentEvalTarget:
             credential = DefaultAzureCredential()
 
         # Configure tracing for eval (optional — AI Toolkit local trace)
-        if local_debug:
+        if local_tracing:
             try:
                 from agent_framework.observability import configure_otel_providers
                 configure_otel_providers(
@@ -139,14 +141,24 @@ class MultiAgentEvalTarget:
             except Exception:
                 pass
 
+        try:
+            from opentelemetry.trace import NonRecordingSpan
+            if not hasattr(NonRecordingSpan, "attributes"):
+                NonRecordingSpan.attributes = property(lambda self: {})
+            from azure.ai.projects.telemetry import AIProjectInstrumentor
+            if not AIProjectInstrumentor().is_instrumented():
+                AIProjectInstrumentor().instrument(enable_content_recording=local_tracing)
+        except Exception:
+            pass
+
         self._client = AzureOpenAIResponsesClient(
             credential=credential,
             endpoint=endpoint,
             deployment_name=model,
         )
 
-        self._triage, self._web_agent, self._license_agent = create_agents(
-            self._client, credential
+        self._triage, self._web_agent, self._license_agent, self._license_provider = (
+            await create_agents(self._client)
         )
         self._agents_created = True
         logger.info("Multi-agent eval target initialized")

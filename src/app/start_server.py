@@ -125,6 +125,18 @@ def start_server(
     APP["agent_app"] = agent_application
     APP["adapter"] = agent_application.adapter
 
+    async def _on_cleanup(app: Application):
+        """Clean up agent resources on server shutdown."""
+        try:
+            from app.agents.foundry_agent_client import get_agent_client
+            client = get_agent_client()
+            if client:
+                await client.cleanup()
+        except Exception as e:
+            logger.warning("Error during agent cleanup: %s", e)
+
+    APP.on_cleanup.append(_on_cleanup)
+
     # Configure access logger to only allow /api/messages logs
     access_logger = logging.getLogger("aiohttp.access")
     access_logger.addFilter(ApiMessagesOnlyLogFilter())
