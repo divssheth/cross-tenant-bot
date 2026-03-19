@@ -170,7 +170,7 @@ agent.name = "license_agent"  # Match triage handoff tool name
 return agent, provider  # Caller must keep provider alive
 ```
 
-**Key distinction**: `agent_name` (not `agent_id`) is used because the value is a human-readable name, not an `asst_...` ID.
+**Key distinction**: `get_agent(name=...)` retrieves the persistent Foundry agent by its human-readable name (e.g. `unified-knowledge-agent-1`). No `asst_*` IDs are involved.
 
 ---
 
