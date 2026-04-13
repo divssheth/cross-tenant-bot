@@ -1,0 +1,79 @@
+<mxfile host="app.diagrams.net" activeLayerId="1">
+  <diagram id="page-1" name="Page-1">
+    <mxGraphModel dx="1465" dy="1094" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" background="#FFFFFF" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="cell-2" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontStyle=1;fontSize=14;fontColor=#333333;" value="Message Sequence — End to End" vertex="1">
+          <mxGeometry height="28" width="400" x="200" y="12" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=10;" value="① User sends message in Teams" vertex="1">
+          <mxGeometry height="42" width="380" x="200" y="55" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=10;" value="② M365 Bot Service routes message (UAMI auth)" vertex="1">
+          <mxGeometry height="42" width="380" x="200" y="107" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=10;" value="③ aiohttp validates JWT → @AGENT_APP.message() handler" vertex="1">
+          <mxGeometry height="42" width="380" x="200" y="159" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-6" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=10;" value="④ Store user message in ConversationState" vertex="1">
+          <mxGeometry height="42" width="380" x="200" y="211" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-7" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontStyle=1;align=left;spacingLeft=10;" value="⑤ get_agent_client().chat()  —  THE BRIDGE" vertex="1">
+          <mxGeometry height="42" width="380" x="200" y="263" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-8" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=10;" value="⑥ Build message history + Create fresh workflow" vertex="1">
+          <mxGeometry height="42" width="380" x="200" y="315" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-9" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=10;" value="⑦ Triage Agent classifies intent" vertex="1">
+          <mxGeometry height="42" width="380" x="200" y="367" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-10" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=10;" value="⑧ Handoff → Web Agent executes tools (Bing, MCP, acronyms)" vertex="1">
+          <mxGeometry height="42" width="380" x="200" y="419" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-11" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=10;" value="⑨ Extract handoff chain, enrich OpenTelemetry spans" vertex="1">
+          <mxGeometry height="42" width="380" x="200" y="471" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-12" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=10;" value="⑩ AgentResponse returned → Reply sent to Teams" vertex="1">
+          <mxGeometry height="42" width="380" x="200" y="523" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-13" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" value="M365 Agents SDK" vertex="1">
+          <mxGeometry height="26" width="120" x="660" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-14" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontStyle=1;" value="Bridge" vertex="1">
+          <mxGeometry height="26" width="120" x="660" y="96" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-15" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="MS Agent Framework" vertex="1">
+          <mxGeometry height="26" width="120" x="660" y="132" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-16" edge="1" parent="1" source="cell-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;verticalAlign=bottom;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="cell-4" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-17" edge="1" parent="1" source="cell-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;verticalAlign=bottom;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="cell-5" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-18" edge="1" parent="1" source="cell-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;verticalAlign=bottom;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="cell-6" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-19" edge="1" parent="1" source="cell-6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;verticalAlign=bottom;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="cell-7" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-20" edge="1" parent="1" source="cell-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;verticalAlign=bottom;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="cell-8" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-21" edge="1" parent="1" source="cell-8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;verticalAlign=bottom;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="cell-9" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-22" edge="1" parent="1" source="cell-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;verticalAlign=bottom;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="cell-10" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-23" edge="1" parent="1" source="cell-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;verticalAlign=bottom;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="cell-11" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cell-24" edge="1" parent="1" source="cell-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;verticalAlign=bottom;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="cell-12" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
